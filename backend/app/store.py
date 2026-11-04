@@ -208,6 +208,29 @@ def chat_state(paper):
     return fold_chat(events(paper))
 
 
+def fold_walk(evs):
+    """Pure replay of the guided walk: whether the opening turn was made, the reading order it fixed, where the pointer
+    is, which sections were shown (covered), and whether the reviewer stopped the guiding. Later events win."""
+    st = {"opened": False, "order": [], "pointer": None, "covered": [], "stopped": False, "done": False}
+    for e in evs:
+        t, p = e["type"], e["payload"]
+        if t == "opening_made":
+            st["opened"], st["order"] = True, list(p.get("order") or [])
+        elif t == "walk_at":
+            st["pointer"], st["done"] = p["index"], False
+            if p["section"] not in st["covered"]:
+                st["covered"].append(p["section"])
+        elif t == "walk_done":
+            st["done"] = True
+        elif t == "walk_stopped":
+            st["stopped"] = True
+    return st
+
+
+def walk_state(paper):
+    return fold_walk(events(paper))
+
+
 def chat_check_stats(paper):
     """How often the neutrality checks rejected a chat reply for this paper, from the chat_check events."""
     replies = rejected = regenerated = fallbacks = 0

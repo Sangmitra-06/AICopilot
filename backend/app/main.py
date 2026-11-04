@@ -511,6 +511,22 @@ def chat_ep(pid: str, r: ChatReq):
     return chatflow.turn(pid, r.reviewer_id, r.message, spans_of(pid))
 
 
+class OpenReq(BaseModel): reviewer_id: str
+
+
+@app.post("/chat/{pid}/open")
+def chat_open_ep(pid: str, r: OpenReq):
+    """The app starts the conversation once a paper is attached and onboarding is closed (see chatflow.open_turn).
+    Safe to call again (a reload): it then returns opened=false and nothing new."""
+    if flow_mode() != "chat":
+        return JSONResponse({"error": "chat_disabled", "flow": flow_mode()}, status_code=409)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", r.reviewer_id):
+        raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
+    if not have_paper(pid):
+        raise HTTPException(404, "unknown paper")
+    return chatflow.open_turn(pid, r.reviewer_id, spans_of(pid))
+
+
 class Hl(BaseModel): paper_id: str
 class Bear(BaseModel): paper_id: str; criterion: str; text: str
 

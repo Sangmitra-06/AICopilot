@@ -138,6 +138,7 @@ function chatController({ chatReplies, spans = Object.values(BY), select } = {})
   const api = {
     onboarding: async () => ok({ done: true, reason: 'complete', turn: 12 }),
     thread: async () => ok([]),
+    open: async () => ok({ opened: false, messages: [], reason: 'already' }),
     spans: async () => (spans === null ? { ok: false, status: 500, data: null } : ok(spans)),
     chat: async (...a) => { calls.push(a); return q.length > 1 ? q.shift() : q[0] },
     select: async (...a) => select(...a),
@@ -241,6 +242,7 @@ test('a reload brings back the pointers of earlier replies', async () => {
   const api = {
     onboarding: async () => ok({ done: true, reason: 'complete', turn: 12 }),
     thread: async () => ok([{ role: 'assistant', kind: 'chat', text: 'Here (Section 4)', meta: { cites: ['s4'], parts } }]),
+    open: async () => ok({ opened: false, messages: [], reason: 'already' }),
     spans: async () => ok(Object.values(BY)),
   }
   const c = createController({ api, storage, mint: () => 'r1' })

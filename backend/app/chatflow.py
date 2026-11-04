@@ -13,6 +13,7 @@ Everything that changes the review is deterministic code over the event log, not
 import json
 import logging
 import re
+import threading
 import time
 
 from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers, capture, cites
@@ -334,6 +335,55 @@ def conflict_notes(text, spans):
     return out
 
 
+# ------------------------------------------------------------------ the opening turn
+
+OPEN_LOCK = threading.Lock()   # one opening at a time: a double click or a reload must not make two
+
+
+def opening_summary(pid, phrases, spans, names):
+    """The descriptive summary for a reviewer who asked for one before reading, through the same checks as every chat
+    reply (plus: it must carry section pointers). None if the checks never pass or the model is down: the opening just
+    goes without a summary, and the generic fallback line is never shown in its place."""
+    system = build_chat_system(phrases, "before_reading", paper_text(spans), draft_text(pid), [prompts.OPENING_NOTE],
+                               sections=list(names.items()))
+    ctx = {"reviewer_text": " ".join(phrases.values()), "wants_decline": False, "summary_pref": "before_reading",
+           "summary_requested": True, "require_pointer": True, "reword_pool": []}
+    reply, info, _ = generate_checked(build_chat_messages(system, [], prompts.OPENING_ASK), ctx, phrases, spans)
+    chat_checks.record(pid, store, info)
+    if info["fallback"]:
+        log.warning("opening summary dropped: %s", "; ".join(info["errors"])[:300])
+        return None
+    sections = [{"id": i, "name": n} for i, n in names.items()]
+    reply, _ = capture.scrub(reply, sections, claims_ok=False, offers_ok=False, empty_line="")   # no offers, no claims
+    shown, parts, found = cites.extract(reply, spans)
+    if not shown.strip() or not found:
+        return None
+    return {"kind": "summary", "reply": shown, "parts": parts, "cites": found}
+
+
+def open_turn(pid, rid, spans):
+    """The app speaks first, once per paper. Returns {"opened", "messages", "reason"?}. Nothing happens while
+    onboarding is open; a reload (the opening_made event exists) gets nothing new."""
+    with OPEN_LOCK:
+        ob = store.onboarding(rid)
+        if not ob["closed"]:
+            return {"opened": False, "messages": [], "reason": "onboarding"}
+        if store.walk_state(pid)["opened"]:
+            return {"opened": False, "messages": [], "reason": "already"}
+        view = onboarding.profile_view(ob)
+        phrases, names = profile_phrases(view), synth.names()
+        messages = []
+        if summary_preference(view) == "before_reading":
+            s = opening_summary(pid, phrases, spans, names)
+            if s:
+                messages.append(s)
+        for m in messages:
+            log_chat(pid, "assistant", m["reply"], opening=m["kind"], cites=[c["id"] for c in m["cites"]],
+                     parts=m["parts"])
+        store.log(pid, "opening_made", {"summarized": bool(messages), "order": []})
+        return {"opened": bool(messages), "messages": messages}
+
+
 # ------------------------------------------------------------------ the turn
 
 def log_chat(pid, role, text, **meta):
@@ -644,8 +694,8 @@ def checked_errors(reply, ctx, spans=()):
     shown = cites.extract(reply, spans)[0]
     errs = chat_checks.reply_errors(shown, ctx)
     bare = cites.plain(reply)
-    if bare != shown:
-        errs += [e for e in chat_checks.reply_errors(bare, ctx) if e not in errs]
+    if bare != shown:                                     # (the pointer requirement is for the displayed text only)
+        errs += [e for e in chat_checks.reply_errors(bare, {**ctx, "require_pointer": False}) if e not in errs]
     return errs
 
 

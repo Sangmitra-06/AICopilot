@@ -22,6 +22,7 @@ export function createApi(fetchImpl = (...a) => fetch(...a), base = API_BASE) {
     onboarding: rid => call(`/onboarding/${seg(rid)}`),
     answer: (rid, text) => call(`/onboarding/${seg(rid)}/answer`, post({ text })),
     chat: (pid, rid, message) => call(`/chat/${seg(pid)}`, post({ reviewer_id: rid, message })),
+    open: (pid, rid) => call(`/chat/${seg(pid)}/open`, post({ reviewer_id: rid })),
     upload: file => {
       const fd = new FormData()
       fd.append('file', file)

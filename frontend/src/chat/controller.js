@@ -87,9 +87,33 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
     patch({ stage: 'onboarding', menu: step.menu && step.menu.length ? step.menu : null })
   }
 
-  function closeOnboarding(ack = '') {
-    if (state.paperId) { patch({ stage: 'chat', menu: null }); say(lead(ack, COPY.readyChat)) }
-    else { patch({ stage: 'attach', menu: null }); say(lead(ack, COPY.askAttach)) }
+  // A reply from the backend as the reviewer sees it: its text (with clickable pointers), and the PDF following what it
+  // cites. The PDF moves only when the reply cites something it can locate.
+  function showReply(d) {
+    const byId = withCites(state.spans, d.cites)
+    say(d.reply, Array.isArray(d.parts) && d.parts.length ? { parts: d.parts } : {})
+    patch({ spans: byId, focus: nextFocus(state.focus, (d.cites || []).map(c => c.id), byId) })
+  }
+
+  // Once the paper is attached and onboarding is closed the app speaks first (POST /chat/{pid}/open). Returns whether it
+  // said anything. A reload gets nothing (the backend remembers it already opened), and a failure is quiet: the stock
+  // line the caller shows instead is enough. `intro` is said before the opening, only if there is one.
+  async function openPaper(intro = '') {
+    const pid = state.paperId
+    if (!pid) return false
+    const r = await api.open(pid, state.reviewerId)
+    const msgs = r && r.ok && r.data && Array.isArray(r.data.messages) ? r.data.messages.filter(m => m && m.reply) : []
+    if (state.paperId !== pid || !msgs.length) return false
+    if (intro) say(intro)
+    for (const m of msgs) showReply(m)
+    return true
+  }
+
+  async function closeOnboarding(ack = '') {
+    if (state.paperId) {
+      patch({ stage: 'chat', menu: null })
+      if (!(await openPaper(ack))) say(lead(ack, COPY.readyChat))
+    } else { patch({ stage: 'attach', menu: null }); say(lead(ack, COPY.askAttach)) }
   }
 
   async function loadHistory() {
@@ -121,8 +145,8 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
       const r = await api.onboarding(state.reviewerId)
       if (!r.ok || !r.data) { fail(COPY.unreachable); patch({ stage: 'boot' }); return }
       if (r.data.done) {
-        if (state.paperId) { patch({ stage: 'chat', menu: null }); await loadHistory(); await loadSpans() }
-        else closeOnboarding()
+        if (state.paperId) { patch({ stage: 'chat', menu: null }); await loadHistory(); await loadSpans(); await openPaper() }
+        else await closeOnboarding()
       } else {
         showStep(r.data)
       }
@@ -136,7 +160,7 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
     const r = await api.answer(state.reviewerId, text)
     if (r.ok && r.data) {
       patch({ menu: null })
-      if (r.data.done) closeOnboarding(r.data.ack)
+      if (r.data.done) await closeOnboarding(r.data.ack)
       else showStep(r.data)
       return { clear: true }
     }
@@ -156,10 +180,7 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
         const o = r.data.onboarding || {}
         patch({ stage: 'onboarding', menu: o.menu && o.menu.length ? o.menu : null })
       }
-      const byId = withCites(state.spans, r.data.cites)
-      say(r.data.reply, Array.isArray(r.data.parts) && r.data.parts.length ? { parts: r.data.parts } : {})
-      // The PDF moves only when the reply cites something it can locate: never for a reply that cites nothing.
-      patch({ spans: byId, focus: nextFocus(state.focus, (r.data.cites || []).map(c => c.id), byId) })
+      showReply(r.data)
       if (r.data.draft_changed) patch({ draftVersion: state.draftVersion + 1 })
       return { clear: true }
     }
@@ -207,9 +228,9 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
       storage.set(KEYS.paper, pid)
       patch({ paperId: pid, spans: {}, focus: null })
       loadSpans()
-      if (stage === 'attach') { patch({ stage: 'chat' }); say(COPY.gotPaper) }
+      if (stage === 'attach') { patch({ stage: 'chat' }); if (!(await openPaper())) say(COPY.gotPaper) }
       else if (stage === 'onboarding') say(COPY.gotPaperEarly)
-      else { patch({ draftVersion: state.draftVersion + 1 }); say(COPY.switched) }
+      else { patch({ draftVersion: state.draftVersion + 1 }); if (!(await openPaper())) say(COPY.switched) }
     } finally {
       patch({ busy: false })
     }

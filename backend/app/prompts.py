@@ -91,6 +91,16 @@ REVIEW GAPS, DRAFTS AND CONFLICTS
 NUDGES
 - Only when THIS TURN contains a NUDGE directive may you nudge, and then at most one, about the reviewer's REVIEW (what the draft has or lacks), never about the paper. Never say what a strength or a weakness should be. If the reviewer is mid-thought, skip it."""
 
+# The opening turn: the reviewer chose, in onboarding, to have a summary before they read. This is the turn note and
+# the stand-in for the reviewer's message; the rest of the prompt is the ordinary chat prompt (NEUTRALITY included).
+OPENING_NOTE = ("The reviewer has just attached the paper and said in onboarding that they want a short summary before "
+                "they read it. Write that summary now as your whole reply: three to five sentences, descriptive and "
+                "claim-based only. Each sentence says what the authors state or report (\"The authors report ...\") and "
+                "ends with the label of the passage it refers to, in square brackets. Use no evaluative words about the "
+                "paper or any part of it. Do not offer to add anything to the draft, do not ask a question, and do not "
+                "say what to do next.")
+OPENING_ASK = "I have just attached the paper."
+
 # A short, separate call used when a chat reply carries no structured fields: it picks out what the reviewer stated, in
 # their own words, so the app can keep it. A plain line format (not JSON), because it must work however the provider
 # treats response formats.

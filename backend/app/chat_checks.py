@@ -258,6 +258,8 @@ def reply_errors(reply, ctx):
             errs.append("it volunteers a summary the reviewer has not asked for")
         if not POINTER.search(reply):
             errs.append("a summary needs section pointers, for example (Section 3)")
+    elif ctx.get("require_pointer") and not POINTER.search(reply):
+        errs.append("it needs section pointers, for example (Section 3): put the label of the passage after each sentence")
     return errs
 
 
