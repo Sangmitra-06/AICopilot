@@ -6,7 +6,8 @@ from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from . import ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper
+import re
+from . import ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper, onboarding
 from . import brief as brief_mod
 from . import guide as guide_mod
 
@@ -397,6 +398,45 @@ def intent_ep(r: Intent):
     store.log(r.paper_id, "intent", {"criterion": r.criterion, "stage": r.stage,
                                      "intent": out["intent"], "via": out.get("via", "model")})
     return out
+
+class OnbAnswer(BaseModel): text: str
+
+
+def run_onboarding(rid, text=None):
+    """Log the reply (if any), then return the next onboarding step. All rules live in onboarding.py."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", rid):
+        raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
+    key = store.reviewer_key(rid)
+    st = store.onboarding(rid)
+    if text is not None:
+        for e in onboarding.process(st, text):
+            store.log(key, e["type"], e["payload"])
+        st = store.onboarding(rid)
+    evs, step = onboarding.next_step(st, rid)
+    for e in evs:
+        store.log(key, e["type"], e["payload"])
+    step["profile"] = onboarding.profile_view(store.onboarding(rid))
+    return step
+
+
+@app.get("/onboarding/{rid}")
+def onboarding_step(rid: str):
+    """The current onboarding question (repeated, not advanced, if already pending), or done."""
+    return run_onboarding(rid)
+
+
+@app.post("/onboarding/{rid}/answer")
+def onboarding_answer(rid: str, r: OnbAnswer):
+    """Record the reply to the pending question and return the next step."""
+    return run_onboarding(rid, r.text)
+
+
+@app.get("/profile/{rid}")
+def profile_ep(rid: str):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", rid):
+        raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
+    return onboarding.profile_view(store.onboarding(rid))
+
 
 class Hl(BaseModel): paper_id: str
 class Bear(BaseModel): paper_id: str; criterion: str; text: str

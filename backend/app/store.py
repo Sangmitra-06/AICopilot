@@ -132,6 +132,47 @@ def skips(paper):
     return out
 
 
+def reviewer_key(reviewer):
+    """Profile events share the event table; the reviewer id stands where a paper id would."""
+    return "reviewer:" + reviewer
+
+
+def fold_onboarding(evs):
+    """Pure replay of a reviewer's profile events into onboarding state.
+
+    Event types: profile_field_set, evidence_set, onboarding_asked, onboarding_answered,
+    walkthrough_shown, onboarding_closed. Later events win. No profile schema lives here.
+    """
+    st = {"fields": {}, "evidence": {}, "turn": 0, "followups": {}, "asked": [], "pending": None,
+          "closed": None, "walkthrough_shown": False, "last_answer": None}
+    for e in evs:
+        p, t = e["payload"], e["type"]
+        if t == "profile_field_set":
+            st["fields"][p["field"]] = {k: v for k, v in p.items() if k != "field"} | {"ts": e.get("ts")}
+        elif t == "evidence_set":
+            st["evidence"][p["key"]] = {k: v for k, v in p.items() if k != "key"} | {"ts": e.get("ts")}
+        elif t == "onboarding_asked":
+            st["pending"] = p
+            if p["kind"] == "followup":
+                st["followups"][p["field"]] = st["followups"].get(p["field"], 0) + 1
+            elif p["field"] not in st["asked"]:
+                st["asked"].append(p["field"])
+        elif t == "onboarding_answered":
+            st["turn"] += 1
+            st["pending"] = None
+            st["last_answer"] = p if p.get("outcome") == "answered" else None
+        elif t == "walkthrough_shown":
+            st["walkthrough_shown"] = True
+        elif t == "onboarding_closed":
+            st["closed"] = p
+            st["pending"] = None
+    return st
+
+
+def onboarding(reviewer):
+    return fold_onboarding(events(reviewer_key(reviewer)))
+
+
 def facts(paper):
     out = {}
     for e in events(paper):

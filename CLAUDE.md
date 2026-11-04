@@ -84,7 +84,14 @@ own phrases back; do not map their answers onto a fixed rubric.
   PDFs, default `data`). Point them at a temp dir in tests.
 - Frontend: React (App.jsx); conversation flow is an implicit state machine in
   `flow = useRef(...)` with stages ask/confirm/offer/score/draft/free.
-- 16 *_SYS prompts across 8 backend files; each has its own neutrality sentence.
+- 16 *_SYS prompts across 8 backend files; each composes the shared NEUTRALITY block
+  from `prompts.py`.
+- Onboarding: `onboarding.py` holds pure rules (next question, defaults, one follow-up
+  per field, rule-based extraction, 14-turn cap, experience inference, criteria menu,
+  form walkthrough). `store.fold_onboarding` replays `profile_field_set`,
+  `evidence_set`, `onboarding_asked/answered/closed`, `walkthrough_shown` events, keyed
+  `reviewer:<id>` in the same event table. Endpoints: `GET /onboarding/{rid}`,
+  `POST /onboarding/{rid}/answer`, `GET /profile/{rid}`. Frontend not wired yet.
 - Existing neutrality layers (verify.py BANNED regex, judge-model audits in
   guide.py/criterion.py, grounded explanations, draft guard in synth.py) MUST be
   kept. Extend them; do not remove or weaken them.
@@ -100,7 +107,7 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: .\.venv\Scripts\python.exe -m pytest (177 tests + 2 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
+- Python: .\.venv\Scripts\python.exe -m pytest (258 tests + 2 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
 - Frontend: node --test tests/loops/*.test.mjs (12 tests)
 - Build: npm run build in frontend/
 - Setup: python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r backend\requirements.txt
