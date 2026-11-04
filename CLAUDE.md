@@ -134,6 +134,13 @@ own phrases back; do not map their answers onto a fixed rubric.
   `nudges.py` = silent coverage map + at most one nudge per turn (gates: not during onboarding,
   not after a decline, not twice in a row, only at a natural pause; dismissed or twice-ignored
   nudges never repeat). `store.fold_chat` replays the chat events.
+  Replies are kept honest in `chatflow.keep_captures_honest` / `add_line`: the app's own line is the ONLY offer in a
+  reply ("Want me to add that to X?"; model offer sentences are removed) and the ONLY "Added to X, in your own words."
+  (written only after the accepted note is in the store, returned as `added` {note_id, section, label}; every model-written
+  capture claim is stripped). A pending offer is answered by rule (`capture.answer`): "yes" in any wording accepts, naming
+  another section re-targets and writes the note, "no" rejects, a question goes to the model. "What's missing?" and "draft
+  it" (broad wording in `chatflow.GAP_REQ2/DRAFT_REQ2`, plus a model reply that only promises a list or draft) are answered
+  by the app: the open-section list, and the draft text grouped by section, in the reply itself.
 - Flow toggle: `COPILOT_FLOW=chat` (default) or `guided` (turns `/chat` off with a 409);
   `GET /config` reports it. The old guided flow's endpoints and source files are unchanged;
   the frontend keeps it behind `?mode=guided`.
@@ -168,9 +175,9 @@ reports today; update them when they change.
 
 1. **Python** (all backend tests, including the old-flow Python loop tests):
    `.\.venv\Scripts\python.exe -m pytest`
-   -> 1436 passed, 8 skipped (1444 collected: tests/neutrality 741, tests/onboarding 660,
+   -> 1522 passed, 8 skipped (1530 collected: tests/neutrality 827, tests/onboarding 660,
    tests/loops 43). The 8 skipped are the `live` tests (item 5); any other live model call must
-   fail loudly. HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
+   fail loudly. (If RUN_LIVE=1 is set in your shell the 8 run too: 1530 passed.) HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
    tests/conftest.py points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
 2. **Old-flow loop tests** (node):
    `node --test tests/loops/*.test.mjs`
