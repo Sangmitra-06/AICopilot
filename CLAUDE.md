@@ -82,8 +82,16 @@ own phrases back; do not map their answers onto a fixed rubric.
 - Storage paths come from env vars, defaulting to the working directory:
   `COPILOT_DB` (event log, default `copilot.db`) and `COPILOT_DATA_DIR` (uploaded
   PDFs, default `data`). Point them at a temp dir in tests.
-- Frontend: React (App.jsx); conversation flow is an implicit state machine in
-  `flow = useRef(...)` with stages ask/confirm/offer/score/draft/free.
+- Frontend, old guided flow: React (App.jsx); conversation flow is an implicit state machine in
+  `flow = useRef(...)` with stages ask/confirm/offer/score/draft/free. Unchanged; lazy-loaded.
+- Frontend, chat-first (`frontend/src/chat/`): `main.jsx` mounts `Root`, which shows the
+  chat screen unless `?mode=guided` or `GET /config` reports `flow: "guided"` (then the old
+  flow). All behaviour is React-free and tested: `controller.js` (stages boot -> onboarding ->
+  attach -> chat; 409 shows the returned question; a failure is one plain sentence, sending
+  again retries), `api.js`, `draftModel.js`, `flow.js`. Components: Root > ChatApp > ChatView >
+  { Thread (Message, Chip), Composer, "Review draft" toggle, DraftPanel > DraftItem }.
+  Onboarding uses `/onboarding/*` (no paper yet), then `/chat/{pid}` after upload; the reviewer
+  id and paper id are kept in localStorage.
 - 18 *_SYS prompts (16 across 8 backend files, plus `onboarding.TOPIC_SYS` and
   `prompts.CHAT_SYS`); each composes the shared NEUTRALITY block from `prompts.py`.
   `prompts.py` is also the one place for the PROFILE block and the chat prompt assembly.
@@ -135,7 +143,9 @@ own phrases back; do not map their answers onto a fixed rubric.
 - Python: .\.venv\Scripts\python.exe -m pytest (988 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
   HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient; tests/conftest.py
   points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
-- Frontend: node --test tests/loops/*.test.mjs (12 tests)
+- Frontend: node --test tests/loops/*.test.mjs tests/chat/*.test.mjs (77 tests: 12 old-flow, 65
+  chat-first, including a render test that loads the real components through Vite's SSR loader
+  and lists every control on screen)
 - Build: npm run build in frontend/
 - Setup: python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r backend\requirements.txt
 - Project lives at C:\dev\ReviewerAISlop (outside OneDrive; OneDrive breaks SQLite and node_modules)
@@ -145,6 +155,11 @@ own phrases back; do not map their answers onto a fixed rubric.
   frontend-only and not persisted; the backend onboarding step moves flow state to the backend.
 - Drafting gate (synth.py:224, main.py:314) is intentionally still in place until
   the loosening step. Do not change it earlier.
+- Chat-first frontend built and checked end to end in headless Chrome against the real
+  backend and model. KNOWN ISSUE: the model (anthropic/claude-sonnet-5.5 via OpenRouter)
+  often replies in plain prose, which carries no `views`, so a capture offer is not
+  recorded even when the reply says "Added to ...". A flat `json_schema` response format
+  gave 10/10 JSON in a trial (routed to a different provider; not adopted yet).
 
 
   ## Frontend principles (chat-first, guided)

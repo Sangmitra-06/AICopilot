@@ -1,0 +1,101 @@
+/* The chat-first screen. Loaded only with the chat screen, so it cannot affect the old guided flow's styles. */
+
+:root {
+  --ca-bg: #faf9f6;
+  --ca-surface: #ffffff;
+  --ca-ink: #1d2129;
+  --ca-muted: #6b7180;
+  --ca-line: #e6e3dc;
+  --ca-accent: #3a56d4;          /* the one accent colour */
+  --ca-accent-tint: #e9edfd;
+  --ca-font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--ca-bg); color: var(--ca-ink); font-family: var(--ca-font); font-size: 17px; line-height: 1.6; }
+.ca-root *, .ca-root *::before, .ca-root *::after { box-sizing: border-box; }
+:where(.ca-root) button, :where(.ca-root) textarea { font: inherit; color: inherit; }   /* zero specificity: component colours win */
+:where(.ca-root) :focus-visible { outline: 2px solid var(--ca-accent); outline-offset: 2px; }
+
+.ca-root { display: flex; height: 100%; background: var(--ca-bg); }
+.ca-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* the draft toggle: small, in a slim bar above the thread so it never covers text */
+.ca-bar { flex: none; display: flex; justify-content: flex-end; padding: 14px 20px 0; }
+.ca-toggle {
+  background: var(--ca-bg); border: 1px solid var(--ca-line); border-radius: 999px;
+  padding: 5px 14px; font-size: 14px; color: var(--ca-muted); cursor: pointer;
+}
+.ca-toggle:hover { color: var(--ca-ink); border-color: #cfcbc1; }
+.ca-toggle[aria-pressed='true'] { color: var(--ca-accent); border-color: var(--ca-accent); background: var(--ca-accent-tint); }
+
+/* the thread */
+.ca-thread { flex: 1; overflow-y: auto; padding: 16px 24px 16px; }
+.ca-column { max-width: 700px; margin: 0 auto; }
+.ca-msg { margin: 0 0 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ca-assistant { max-width: 100%; }
+.ca-user { margin-left: auto; width: fit-content; max-width: 85%; background: var(--ca-accent-tint); padding: 10px 16px; border-radius: 18px; }
+.ca-wait { color: var(--ca-muted); letter-spacing: 0.2em; }
+
+/* inline choice chips (novices only) */
+.ca-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 22px; }
+.ca-chip {
+  background: var(--ca-surface); border: 1px solid var(--ca-line); border-radius: 999px;
+  padding: 6px 14px; font-size: 15px; cursor: pointer;
+}
+.ca-chip:hover { border-color: var(--ca-accent); }
+.ca-chip[aria-pressed='true'] { background: var(--ca-accent); border-color: var(--ca-accent); color: #fff; }
+
+/* the one text box: paperclip inside on the left, send inside on the right */
+.ca-composer { padding: 8px 24px 28px; }
+.ca-box {
+  max-width: 700px; margin: 0 auto; display: flex; align-items: flex-end; gap: 4px;
+  background: var(--ca-surface); border: 1px solid var(--ca-line); border-radius: 22px; padding: 6px;
+  box-shadow: 0 1px 2px rgba(29, 33, 41, 0.04);
+}
+.ca-box:focus-within { border-color: var(--ca-accent); }
+.ca-box textarea {
+  flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent;
+  padding: 8px 6px; max-height: 168px; line-height: 1.5;
+}
+.ca-icon {
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%;
+  background: transparent; color: var(--ca-muted); cursor: pointer;
+}
+.ca-icon:hover { color: var(--ca-ink); }
+.ca-send { background: var(--ca-accent); color: #fff; }
+.ca-send:hover { color: #fff; background: #2f47b5; }
+.ca-send:disabled { background: #d9d6ce; color: #fff; cursor: default; }
+
+/* dropping a PDF onto the thread */
+.ca-drag .ca-thread { outline: 2px dashed var(--ca-accent); outline-offset: -14px; background: var(--ca-accent-tint); }
+
+/* the review draft side panel */
+.ca-panel {
+  flex: none; width: 420px; display: flex; flex-direction: column;
+  background: var(--ca-surface); border-left: 1px solid var(--ca-line);
+}
+.ca-panel-body { flex: 1; overflow-y: auto; padding: 56px 24px 16px; }
+.ca-panel-foot { padding: 14px 24px 22px; border-top: 1px solid var(--ca-line); }
+.ca-section { margin: 0 0 28px; }
+.ca-section h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ca-muted); }
+.ca-para {
+  display: block; width: 100%; resize: none; overflow: hidden; border: 1px solid transparent; border-radius: 10px;
+  background: transparent; padding: 8px 10px; margin: 0 -10px 4px; line-height: 1.55;
+}
+.ca-para:hover { border-color: var(--ca-line); }
+.ca-para:focus { outline: none; border-color: var(--ca-accent); background: #fff; }
+.ca-empty, .ca-note { margin: 0; color: var(--ca-muted); font-size: 15px; }
+.ca-note { margin-bottom: 24px; }
+.ca-copy {
+  width: 100%; background: var(--ca-accent); color: #fff; border: 0; border-radius: 12px; padding: 10px 16px; cursor: pointer;
+}
+.ca-copy:hover { background: #2f47b5; }
+
+@media (max-width: 900px) {
+  .ca-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100%); z-index: 3; box-shadow: -8px 0 24px rgba(29, 33, 41, 0.12); }
+}
+@media (max-width: 520px) {
+  body { font-size: 16px; }
+  .ca-thread, .ca-composer { padding-left: 16px; padding-right: 16px; }
+}
