@@ -132,7 +132,7 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: .\.venv\Scripts\python.exe -m pytest (977 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
+- Python: .\.venv\Scripts\python.exe -m pytest (980 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
   HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient; tests/conftest.py
   points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
 - Frontend: node --test tests/loops/*.test.mjs (12 tests)

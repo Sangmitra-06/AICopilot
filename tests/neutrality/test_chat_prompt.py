@@ -181,3 +181,27 @@ def test_bad_requests_are_4xx(chat_env):
     assert c.post("/chat/p1", json={"reviewer_id": "rev", "message": ""}).status_code == 422
     assert c.post("/chat/p1", json={"reviewer_id": "rev"}).status_code == 422
     assert c.post("/chat/nope", json={"reviewer_id": "rev", "message": "x"}).status_code == 404
+
+
+# ------------------------------------------------------------------ the output-format instruction goes last
+
+def test_the_output_format_is_the_last_thing_in_the_assembled_prompt():
+    from app.prompts import OUTPUT_FORMAT
+    s = build_chat_system(PHRASES, "after_reading", "PAPER", "DRAFT", ["a note for this turn"],
+                          sections=[("summary", "Paper summary")])
+    assert s.endswith(OUTPUT_FORMAT) and s.count(OUTPUT_FORMAT) == 1
+    for later_than_it in ("PROFILE", "THE PAPER", "THE REVIEW DRAFT", "REVIEW-FORM SECTIONS", "THIS TURN:"):
+        assert s.index(later_than_it) < s.index(OUTPUT_FORMAT)               # everything else comes before it
+
+
+def test_it_is_last_with_or_without_turn_notes_and_is_not_repeated_in_the_static_text():
+    from app.prompts import OUTPUT_FORMAT
+    assert build_chat_system({}, None, "P", "D").endswith(OUTPUT_FORMAT)
+    assert "Return one JSON object" not in CHAT_SYS and "Return one JSON object" in OUTPUT_FORMAT
+    assert NEUTRALITY in CHAT_SYS                                              # the shared block is unaffected
+
+
+def test_the_output_format_names_every_key_the_parser_reads():
+    from app.prompts import OUTPUT_FORMAT
+    for key in ("reply", "views", "offer_response", "offer_section", "reword", "intent", "nudge_used"):
+        assert f'"{key}"' in OUTPUT_FORMAT, key
