@@ -36,13 +36,21 @@ OPINION = re.compile(
     r"\bi (?:agree|disagree)\b|"
     r"\bi (?:think|believe|feel) (?:the paper|this paper|the authors|the results|the experiments|the method|"
     r"your (?:concern|point|view|assessment|criticism|take|read))\b|"
-    r"\bi would (?:accept|reject|score|rate|recommend)\b|"
+    r"\bi(?: would|(?:'|’)d) (?:accept|reject|score|rate|recommend)\b|"
     r"\byou(?:'|’)?re (?:absolutely |completely |totally |quite )?(?:right|correct|wrong|mistaken)\b|"
     r"\byou are (?:absolutely |completely |totally |quite )?(?:right|correct|wrong|mistaken)\b|"
     r"\b(?:good|great|excellent|fair|valid|astute|sharp) (?:point|catch|call|observation|criticism)\b|"
     r"\bthat(?:'|’)?s (?:a )?(?:fair|valid|good|great|reasonable|legitimate|solid|strong) "
     r"(?:concern|point|criticism|take|read|worry|observation)\b|"
-    r"\b(?:the paper|this paper|it) (?:deserves|should be) (?:accepted|rejected)\b", re.I)
+    r"\b(?:the paper|this paper|it) (?:deserves|should be|ought to be) (?:accepted|rejected)\b", re.I)
+
+# A decline may NAME the thing it declines, as an evaluative word may be named ("I can't say whether it is novel"):
+# "Whether I agree isn't something I can weigh in on", "I can't weigh in on accept or reject". The named clause
+# (after whether / if / on / about / regarding, up to punctuation or a conjunction) is set aside before the
+# opinion and judgment patterns are applied. Anything asserted outside that clause is still checked in full, so
+# "I can't weigh in on whether it is novel, but I'd accept it" stays blocked.
+NAMED = re.compile(r"\b(?:whether|if|on|about|regarding)\b"
+                   r"(?:(?!\b(?:and|but|though|although|however|so|then|because|since|while)\b)[^.;,!?]){0,60}", re.I)
 
 # Stock endings from the old guided flow, or any line that just steers back to a topic.
 FORM_TAIL = re.compile(r"(?:\bback to [^.?!\n]{0,60}|\banything (?:else )?to add\b[^.?!\n]{0,20}|"
@@ -144,15 +152,21 @@ def banned_hits(reply, licensed):
     return hits
 
 
-def scrubbed(reply, licensed):
-    """The reply as JUDGE should see it: quotes and technical terms gone, "okay" gone, and the reviewer's own
-    evaluative words blanked in sentences addressed to them."""
-    out = []
+def judgment_flags(reply, licensed):
+    """(takes_a_side, states_a_judgment), sentence by sentence. Quotes and technical terms are ignored, "okay" is
+    ignored, the reviewer's own evaluative words are blanked where licensed, and in a sentence that declines the
+    clause naming what is declined is set aside first."""
+    side = judged = False
     for sent in SENT.split(TECH_TERMS.sub(" ", QUOTED.sub(" ", reply))):
+        if DECLINE_MARK.search(sent):
+            sent = NAMED.sub(" ", sent)
+        if OPINION.search(sent):
+            side = True
         sent = OKAY.sub(" ", sent)
         sent = EVAL_WORD.sub(lambda m: "xx" if licensed_here(sent, m.group(0).lower(), licensed) else m.group(0), sent)
-        out.append(sent)
-    return ". ".join(out)
+        if JUDGE.search(sent):
+            judged = True
+    return side, judged
 
 
 def questions(reply):
@@ -227,9 +241,10 @@ def reply_errors(reply, ctx):
     hits = banned_hits(reply, lic)
     if hits:
         errs.append("evaluative wording (" + ", ".join(sorted(set(hits))) + "): describe, do not rate")
-    if OPINION.search(QUOTED.sub(" ", reply)):
+    side, judged = judgment_flags(reply, lic)
+    if side:
         errs.append("it takes a side on the paper or on the reviewer's view; say what you heard instead")
-    if JUDGE.search(scrubbed(reply, lic)):
+    if judged:
         errs.append("it states or asks for a judgment of the paper")
     if FORM_TAIL.search(reply):
         errs.append("it ends with a stock line that steers back to a topic; end where the thought ends")

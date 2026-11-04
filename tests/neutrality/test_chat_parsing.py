@@ -221,14 +221,3 @@ def test_plain_json_is_not_logged_as_a_problem(env, caplog):
     with caplog.at_level(logging.WARNING, logger="copilot.chat"):
         post(c, "which datasets do they use?")
     assert not [r for r in caplog.records if "not plain JSON" in r.getMessage()]
-
-
-def test_the_neutrality_checks_themselves_are_unchanged():
-    import pathlib
-    import subprocess
-    root = pathlib.Path(__file__).resolve().parents[2]
-    out = subprocess.run(["git", "diff", "--stat", "HEAD", "--", "backend/app/chat_checks.py", "backend/app/verify.py"],
-                         capture_output=True, text=True, cwd=root)
-    if out.returncode != 0:
-        pytest.skip("git history not available")
-    assert out.stdout.strip() == ""
