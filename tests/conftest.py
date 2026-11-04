@@ -14,6 +14,11 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
+import tempfile
+
+# store.py opens COPILOT_DB when it is imported. Point it at a throwaway file first so the suite never
+# creates or writes the real copilot.db (set before any `app` import below or in test modules).
+os.environ.setdefault("COPILOT_DB", os.path.join(tempfile.mkdtemp(prefix="copilot-tests-"), "events.db"))
 os.environ.setdefault("OPENROUTER_API_KEY", "test-key")
 os.environ.setdefault("MODEL", "test-model")
 
