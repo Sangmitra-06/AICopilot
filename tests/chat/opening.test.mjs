@@ -89,3 +89,14 @@ test('a reload with a paper asks again; the backend answers "already" and the th
   assert.ok(calls.some(x => x[0] === 'open'))
   assert.deepEqual(texts(c), ['The authors report X (Abstract).'])
 })
+
+test('a summary followed by the first section: both are shown in order and the PDF ends on the section', async () => {
+  const sec = { kind: 'section', reply: 'Starting with the intro, as you said you like to (Section 1).',
+    cites: [{ id: 's2', page: 2, bbox: [10, 100, 100, 130], section: '1 Introduction' }],
+    parts: [{ text: 'Starting with the intro, as you said you like to ', cite: null }, { text: '(Section 1)', cite: ['s2'] }, { text: '.', cite: null }] }
+  const { c } = make({ onboarding: [ok(DONE)], upload: [ok({ paper_id: 'p1' })], open: [ok({ opened: true, messages: [summary, sec] })] })
+  await c.start()
+  await c.attach(PDF)
+  assert.deepEqual(texts(c).slice(-2), ['The authors report X (Abstract).', sec.reply])
+  assert.deepEqual(c.getState().focus.items.map(i => i.id), ['s2'])
+})

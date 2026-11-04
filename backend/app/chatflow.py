@@ -19,7 +19,7 @@ import time
 from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers, capture, cites
 from .llm import _chat
 from .prompts import build_chat_system, build_chat_messages
-from . import prompts
+from . import prompts, walk
 from .verify import norm
 
 log = logging.getLogger("copilot.chat")
@@ -337,7 +337,8 @@ def conflict_notes(text, spans):
 
 # ------------------------------------------------------------------ the opening turn
 
-OPEN_LOCK = threading.Lock()   # one opening at a time: a double click or a reload must not make two
+PARA = "\n\n"
+OPEN_LOCK = threading.Lock()  # one opening at a time: a double click or a reload must not make two
 
 
 def opening_summary(pid, phrases, spans, names):
@@ -361,6 +362,14 @@ def opening_summary(pid, phrases, spans, names):
     return {"kind": "summary", "reply": shown, "parts": parts, "cites": found}
 
 
+def section_message(spans, entry, hint=""):
+    """The app's own line taking the reviewer to one section: their words, a pointer, nothing about the paper. Its
+    passages are cited, so the PDF scrolls there."""
+    text = walk.opening_line(entry, spans) + ((PARA + hint) if hint else "")
+    shown, parts, found = cites.extract(text, spans)
+    return {"kind": "section", "reply": shown, "parts": parts, "cites": found}
+
+
 def open_turn(pid, rid, spans):
     """The app speaks first, once per paper. Returns {"opened", "messages", "reason"?}. Nothing happens while
     onboarding is open; a reload (the opening_made event exists) gets nothing new."""
@@ -377,10 +386,16 @@ def open_turn(pid, rid, spans):
             s = opening_summary(pid, phrases, spans, names)
             if s:
                 messages.append(s)
+        order = walk.build_order(view, spans)
+        summarized = bool(messages)
+        if order:
+            messages.append(section_message(spans, order[0], walk.GUIDE_HINT))
         for m in messages:
             log_chat(pid, "assistant", m["reply"], opening=m["kind"], cites=[c["id"] for c in m["cites"]],
                      parts=m["parts"])
-        store.log(pid, "opening_made", {"summarized": bool(messages), "order": []})
+        store.log(pid, "opening_made", {"summarized": summarized, "order": order})
+        if order:
+            store.log(pid, "walk_at", {"index": 0, "section": order[0]["section"], "reason": "start"})
         return {"opened": bool(messages), "messages": messages}
 
 

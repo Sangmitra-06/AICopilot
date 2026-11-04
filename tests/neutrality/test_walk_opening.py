@@ -69,7 +69,7 @@ def test_a_model_that_only_judges_never_reaches_the_reviewer(chat_env, bad):
     body = open_(c)
     shown = " ".join(m["reply"] for m in body["messages"])
     assert not BANNED.search(shown) and cc.FALLBACK not in shown                # no summary, and no fallback apology
-    assert body["opened"] is False and body["messages"] == []
+    assert [m["kind"] for m in body["messages"]] == ["section"]                # (the walk's first section still comes)
     assert open_(c)["opened"] is False                                         # and it is not retried forever
 
 
@@ -82,7 +82,7 @@ def test_a_down_model_is_no_summary_not_a_500(chat_env, monkeypatch):
     from app import chatflow
     monkeypatch.setattr(chatflow, "_chat", boom)
     body = open_(c)
-    assert body["opened"] is False and body["messages"] == []
+    assert [m["kind"] for m in body["messages"]] == ["section"]
 
 
 @pytest.mark.parametrize("said", [
@@ -97,8 +97,8 @@ def test_after_reading_none_or_unset_skips_the_summary(chat_env, said):
     model = set_model({"reply": SUMMARY})
     body = open_(c)
     assert model.calls == []                                                    # not even asked
-    assert body["messages"] == [] and body["opened"] is False
-    assert assistant_turns() == []
+    assert [m["kind"] for m in body["messages"]] == ["section"]                 # no summary: only the first section
+    assert [t["meta"]["opening"] for t in assistant_turns()] == ["section"]
 
 
 def test_the_opening_is_made_once_per_paper_even_after_a_reload(chat_env):
@@ -109,7 +109,7 @@ def test_the_opening_is_made_once_per_paper_even_after_a_reload(chat_env):
     again = open_(c)                                                            # a reload asks again
     assert again["opened"] is False and again["messages"] == [] and again["reason"] == "already"
     assert len(model.calls) == 1
-    assert len(assistant_turns()) == 1
+    assert len(assistant_turns()) == 2                                          # the summary and the first section
     assert [e["type"] for e in store.events("p1") if e["type"] == "opening_made"] == ["opening_made"]
 
 
@@ -119,10 +119,10 @@ def test_the_opening_is_logged_without_a_user_turn_and_survives_a_reload(chat_en
     set_model({"reply": SUMMARY})
     open_(c)
     turns = [t for t in store.thread("p1") if t.get("kind") == "chat"]
-    assert [t["role"] for t in turns] == ["assistant"]
+    assert [t["role"] for t in turns] == ["assistant", "assistant"]
     assert turns[0]["meta"]["cites"] == ["s1", "s2", "s4"] and turns[0]["meta"]["parts"]
     shown = c.get("/thread/p1").json()
-    assert shown[-1]["text"] == turns[0]["text"]
+    assert [x["text"] for x in shown[-2:]] == [x["text"] for x in turns]
 
 
 def test_no_opening_while_onboarding_is_open_and_it_happens_when_it_closes(chat_env):
