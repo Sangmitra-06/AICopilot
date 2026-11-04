@@ -417,7 +417,10 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
             out["conflicts"] = conflict_notes(made[1]["text"], spans)
             if out["conflicts"]:
                 reply += "\n\n" + "\n".join(c["text"] for c in out["conflicts"])
-        if nudge and j.get("nudge_used") is True and not out["capture"] and nudge_in(reply, nudge):
+        # A nudge counts as used when a directive was given this turn and the reply addresses that section. The model's
+        # own nudge_used flag is optional (a prose reply has none); only an explicit false (it skipped the nudge) is
+        # respected.
+        if nudge and j.get("nudge_used") is not False and not out["capture"] and nudge_in(reply, nudge):
             store.log(pid, "nudge_offered", {"section": nudge["section"], "kind": nudge["kind"]})
             meta["nudge"] = nudge["section"]
             out["nudge"] = {"section": nudge["section"], "label": nudge["label"], "kind": nudge["kind"]}

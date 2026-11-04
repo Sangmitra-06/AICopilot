@@ -254,3 +254,72 @@ def test_a_promise_in_chat_is_remembered_and_pulls_that_section_forward(env):
     model = set_model(PLAIN)
     post(c, "ok")
     assert "You mentioned you would cover Ethical concerns; nothing is there yet." in model.system
+
+
+# ------------------------------------------------------------------ nudge_used is optional
+
+PROSE_NUDGE = "Alright. Your draft has nothing under Paper summary yet. Want to start there?"
+
+
+def test_a_prose_reply_that_addresses_the_section_records_the_nudge(env):
+    c, set_model = env
+    model = set_model(PROSE_NUDGE)                       # plain text: no JSON at all, so no nudge_used flag
+    body = post(c, "ok")
+    assert "NUDGE (optional)" in model.system
+    assert body["nudge"] == {"section": "summary", "label": "Paper summary", "kind": "empty"}
+    assert store.chat_state("p1")["nudges"]["summary"]["offered"] == 1
+    assert store.thread("p1")[-1]["meta"]["nudge"] == "summary"
+
+
+def test_json_without_the_flag_records_it_too(env):
+    c, set_model = env
+    set_model({"reply": PROSE_NUDGE})
+    assert post(c, "ok")["nudge"]["section"] == "summary"
+
+
+def test_an_explicit_false_from_the_model_is_still_respected(env):
+    c, set_model = env
+    set_model({"reply": PROSE_NUDGE, "nudge_used": False})
+    assert post(c, "ok")["nudge"] is None and store.chat_state("p1")["nudges"] == {}
+
+
+def test_a_reply_that_does_not_address_the_section_records_nothing(env):
+    c, set_model = env
+    set_model("Sure, take your time.")
+    assert post(c, "ok")["nudge"] is None
+    set_model({"reply": "Sure.", "nudge_used": True})                  # a true flag cannot make up for it
+    assert post(c, "ok")["nudge"] is None
+
+
+def test_no_directive_means_no_nudge_even_if_the_reply_names_a_section(env):
+    c, set_model = env
+    model = set_model("Section 4 does not say anything about the paper summary or the strengths.")
+    body = post(c, "what does Section 4 say about the datasets used here?")
+    assert "NUDGE (optional)" not in model.system and body["nudge"] is None
+    assert store.chat_state("p1")["nudges"] == {}
+
+
+def test_prose_nudges_obey_the_same_gates(env):
+    c, set_model = env
+    model = set_model(PROSE_NUDGE)
+    assert post(c, "ok")["nudge"] is not None
+    assert post(c, "ok")["nudge"] is None and "NUDGE (optional)" not in model.system     # never twice in a row
+
+
+def test_a_dismissed_prose_nudge_is_never_repeated(env):
+    c, set_model = env
+    set_model(PROSE_NUDGE)
+    assert post(c, "ok")["nudge"]["section"] == "summary"
+    post(c, "not now")                                                                   # explicit dismissal
+    assert store.chat_state("p1")["nudges"]["summary"]["dismissed"] is True
+    for _ in range(6):
+        post(c, "ok")
+    assert store.chat_state("p1")["nudges"]["summary"]["offered"] == 1                    # never repeated
+
+
+def test_a_decline_in_prose_is_not_followed_by_a_nudge(env):
+    c, set_model = env
+    set_model("That's your call to make, not mine. Table 2 has the numbers (Section 4).")
+    post(c, "is this novel?")
+    model = set_model(PROSE_NUDGE)
+    assert post(c, "ok")["nudge"] is None and "NUDGE (optional)" not in model.system

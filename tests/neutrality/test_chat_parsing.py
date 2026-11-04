@@ -103,12 +103,14 @@ def test_plain_prose_is_shown_and_its_fields_are_empty(env):
     assert body["checks"] == {"attempts": 1, "fallback": False} and forms() == ["prose"]
 
 
-def test_prose_cannot_capture_reword_or_nudge(env):
+def test_prose_cannot_capture_or_reword_but_can_carry_a_nudge(env):
     c, set_model = env
     set_model("Noted. Want me to add that to the Weaknesses section? Your draft has nothing under Paper summary yet.")
     body = post(c, "ok")
-    assert body["capture"] is None and body["reword"] is None and body["nudge"] is None
+    assert body["capture"] is None and body["reword"] is None            # these need the structured fields
     assert store.chat_state("p1")["views"] == {}
+    # A nudge does not: a directive was given and the reply addresses the section (nudge_used is optional).
+    assert body["nudge"] == {"section": "summary", "label": "Paper summary", "kind": "empty"}
 
 
 # Plain prose gets exactly the same neutrality checks as JSON.
