@@ -109,6 +109,62 @@ def offer_line(label, text=None):
     return f"Want me to add that to {where}?" if text is None else f"Want me to add “{text}” to {where}?"
 
 
+# ------------------------------------------------------------------ the reviewer's answer to a pending offer
+
+ADD_VERB = re.compile(r"\b(?:add|put|save|capture|include|place|file|record|keep|note)\b", re.I)
+YES_START = re.compile(r"^\W*(?:y|yes|yeah|yea|yep|yup|sure|ok|okay|alright|please|absolutely|definitely|of course|"
+                       r"go ahead|do it|sounds good|that works|correct|right|exactly)\b", re.I)
+GO_AHEAD = re.compile(r"\b(?:go ahead|do it|sounds good|that works|please do)\b", re.I)
+NO_START = re.compile(r"^\W*(?:n|no|nope|nah|not now|not yet|don(?:'|’)?t|do not|never|skip)\b", re.I)
+NEGATION = re.compile(r"\b(?:no|nope|nah|not|never|dont|skip|leave it|forget it)\b|n(?:'|’)t\b", re.I)
+NEGATED_ADD = re.compile(r"(?:\bdon(?:'|’)?t|\bdo not|\bnever|\bnot)\s+(?:\w+\s+){0,2}?" + ADD_VERB.pattern, re.I)
+CORRECTION = re.compile(r"\b(?:i mean|i meant|instead|rather|my mistake|correction)\b", re.I)
+ADD_IT = re.compile(r"^\W*(?:please\s+)?(?:add|put|save|capture)\s+(?:it|that|this)\b", re.I)
+
+
+def named_section(message, sections):
+    """The review-form section a message names, or None. A full section name wins; otherwise the section whose name
+    word comes last in the message (a correction usually ends with where it should go)."""
+    low = message.lower()
+    full = [(low.rfind(s["name"].lower()), s["id"]) for s in sections if s["name"].lower() in low]
+    if full:
+        return max(full)[1]
+    best = None
+    for s in sections:
+        for w in nudges.section_words(s):
+            for m in re.finditer(r"\b" + re.escape(w) + r"s?\b", low):
+                if best is None or m.end() > best[0]:
+                    best = (m.end(), s["id"])
+    return best[1] if best else None
+
+
+def answer(message, sections):
+    """How a message answers a pending offer to add something to the draft: ("accept", section id or None),
+    ("reject", None), or None when it does not answer it. `sections` is [{id, name}].
+    - "yes", "yes lets add it as my sentence", "sure, add it", "go ahead": accept, even with extra words;
+    - a message that asks to add it and names a section ("no i mean add the paper summary", "put it under
+      strengths") accepts and RE-TARGETS the offer to that section;
+    - "no", "no thanks", "don't add that": reject;
+    - a question, or a yes that leads into something else, answers nothing (it goes to the model as usual)."""
+    m = (message or "").strip()
+    if not m or m.endswith("?"):
+        return None
+    sid = named_section(m, sections)
+    wants_add = bool(ADD_VERB.search(m)) and not NEGATED_ADD.search(m)
+    if sid and (wants_add or CORRECTION.search(m)):
+        return "accept", sid
+    short = len(m.split()) <= 5
+    if NEGATED_ADD.search(m) or (NO_START.match(m) and short):
+        return "reject", None
+    if NEGATION.search(m):
+        return None
+    if (YES_START.match(m) or GO_AHEAD.search(m)) and (wants_add or short or GO_AHEAD.search(m)):
+        return "accept", None
+    if ADD_IT.match(m):
+        return "accept", None
+    return None
+
+
 # ------------------------------------------------------------------ reading the extraction call
 
 LINE = re.compile(r"^\s*(?:[-*•]\s*)?VIEW\s*\|\s*([A-Za-z0-9_ -]*?)\s*\|\s*(.+?)\s*$", re.I)

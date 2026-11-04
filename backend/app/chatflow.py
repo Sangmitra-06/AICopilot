@@ -206,17 +206,26 @@ def open_offer(st):
 
 
 def resolve_by_rule(pid, st, message, names):
-    """A bare yes / no to the open offer. Returns ("accepted"|"rejected", vid, view) or None."""
+    """The reviewer's answer to the open offer, read by rule (capture.answer): a yes in any wording, a no, or a
+    correction that names another section (the offer is re-targeted there and the note is written).
+    Returns ("accepted"|"rejected", vid, view) or None."""
     vid, v = open_offer(st)
     if not v:
         return None
-    if chat.YES.match(message.strip()):
-        accept_capture(pid, vid, v)
+    msg = message.strip()
+    if chat.YES.match(msg):
+        res = ("accept", None)
+    elif chat.NO.match(msg):
+        res = ("reject", None)
+    else:
+        res = capture.answer(msg, [{"id": i, "name": n} for i, n in names.items()])
+    if not res:
+        return None
+    if res[0] == "accept":
+        accept_capture(pid, vid, v, res[1])
         return "accepted", vid, v
-    if chat.NO.match(message.strip()):
-        reject_capture(pid, vid)
-        return "rejected", vid, v
-    return None
+    reject_capture(pid, vid)
+    return "rejected", vid, v
 
 
 def tone_notes(hist):
