@@ -15,9 +15,10 @@ import logging
 import re
 import time
 
-from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers
+from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers, capture
 from .llm import _chat
 from .prompts import build_chat_system, build_chat_messages
+from . import prompts
 from .verify import norm
 
 log = logging.getLogger("copilot.chat")
@@ -320,7 +321,7 @@ def turn(pid, rid, message, spans):
     st = store.chat_state(pid)
     variant = sum(1 for h in hist if h["role"] == "assistant")
     out = {"mode": "chat", "capture": None, "resolved": None, "reword": None, "conflicts": [], "gaps": None,
-           "drafted": None, "nudge": None}
+           "drafted": None, "nudge": None, "captured": []}
     meta = {}
 
     ruled = resolve_by_rule(pid, st, message, names)  # a bare "yes"/"no" to the capture offered last turn
@@ -345,7 +346,8 @@ def turn(pid, rid, message, spans):
     else:
         model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled, variant, out, meta)
 
-    out["draft_changed"] = (out["resolved"] or {}).get("outcome") == "accepted" or bool((out["drafted"] or {}).get("drafted"))
+    out["draft_changed"] = ((out["resolved"] or {}).get("outcome") == "accepted" or bool((out["drafted"] or {}).get("drafted"))
+                            or bool(out.get("captured")))
     log_chat(pid, "user", message)
     log_chat(pid, "assistant", out["reply"], **meta)
     return out
@@ -424,7 +426,71 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
             store.log(pid, "nudge_offered", {"section": nudge["section"], "kind": nudge["kind"]})
             meta["nudge"] = nudge["section"]
             out["nudge"] = {"section": nudge["section"], "label": nudge["label"], "kind": nudge["kind"]}
+        reply = keep_captures_honest(pid, message, reply, j, names, out, wants_decline)
     out["reply"] = reply
+
+
+def looks_like_view(message):
+    """Is this message worth an extraction call: a statement of some length, not a question, a request or a pause?
+    (The detector itself is the extraction call; this only avoids calling it for messages that cannot be views.)"""
+    m = message.strip()
+    if len(m.split()) < 4 or chat_checks.QUESTION_LIKE.search(m) or chat_checks.asks_for_judgment(m):
+        return False
+    if GAP_REQ.search(m) or DRAFT_REQ.search(m) or nudges.natural_pause(m):
+        return False
+    return not re.match(r"(?i)^\s*(?:please\s+)?(?:reword|rephrase|rewrite|tighten|soften|polish|make this)\b", m)
+
+
+def extract_views(pid, message, names):
+    """One short call for the reviewer's own words and a section id. Anything that goes wrong, or comes back that is
+    not a verbatim span of the message, is no views: the turn carries on without mentioning captures."""
+    sections = "\n".join(f"- {i}: {n}" for i, n in names.items())
+    try:
+        raw = _chat([{"role": "system", "content": prompts.VIEW_SYS},
+                     {"role": "user", "content": f"Review-form sections:\n{sections}\n\nReviewer's message:\n{message}"}])
+    except Exception as e:
+        log.warning("view extraction failed: %r", e)
+        return []
+    views = capture.parse_views(raw)[:3]
+    if not views:
+        log.info("view extraction found none; raw[:%d] = %r", RAW_LOG_CHARS,
+                 (raw if isinstance(raw, str) else repr(raw))[:RAW_LOG_CHARS])
+    new = valid_views({"views": views}, message, store.chat_state(pid)["views"], names)
+    have = [{"text": i["text"]} for i in synth.items(pid)]
+    return [v for v in new if not coverage.in_draft(v["text"], have)]
+
+
+def write_captures(pid, views, names):
+    """Write the views to the draft as ordinary notes (editable and removable like any other). The app, not the
+    model, is what says it happened."""
+    out = []
+    for v in views:
+        vid = f"v{len(store.chat_state(pid)['views']) + 1}"
+        store.log(pid, "view_stated", {"vid": vid, "text": v["text"], "section": v["section"]})
+        nid = accept_capture(pid, vid, store.chat_state(pid)["views"][vid])
+        out.append({"id": vid, "note_id": nid, "text": v["text"], "section": v["section"],
+                    "label": names.get(v["section"], "")})
+    return out
+
+
+def keep_captures_honest(pid, message, reply, j, names, out, wants_decline):
+    """The reply may say something was added to the draft only if the backend recorded it this turn.
+    - If the reply carried no structured fields and the message states a view, extract it and write it; the app
+      confirms it in its own words.
+    - Claims that something was added / saved / noted, and offers to do so that no offer stands behind, are removed."""
+    accepted_now = (out["resolved"] or {}).get("outcome") == "accepted"
+    structured = bool(j.get("views") or j.get("reword") or j.get("offer_response") or out["capture"] or out["resolved"])
+    captured = []
+    if not structured and not wants_decline and looks_like_view(message):
+        captured = write_captures(pid, extract_views(pid, message, names), names)
+    sections = [{"id": i, "name": n} for i, n in names.items()]
+    asked = bool(chat.YES.match(message.strip()) or re.search(r"(?i)\b(?:add|save|capture|keep|record)\b", message))
+    reply, _ = capture.scrub(reply, sections, claims_ok=accepted_now, offers_ok=bool(out["capture"]),
+                             empty_line=capture.NOT_ADDED if asked else capture.OK)
+    if captured:
+        out["captured"] = captured
+        reply = (reply + "\n\n" + capture.confirmation(captured)).strip()
+    return reply
 
 
 def nudge_in(reply, nudge):

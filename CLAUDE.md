@@ -92,8 +92,8 @@ own phrases back; do not map their answers onto a fixed rubric.
   { Thread (Message, Chip), Composer, "Review draft" toggle, DraftPanel > DraftItem }.
   Onboarding uses `/onboarding/*` (no paper yet), then `/chat/{pid}` after upload; the reviewer
   id and paper id are kept in localStorage.
-- 18 *_SYS prompts (16 across 8 backend files, plus `onboarding.TOPIC_SYS` and
-  `prompts.CHAT_SYS`); each composes the shared NEUTRALITY block from `prompts.py`.
+- 19 *_SYS prompts (16 across 8 backend files, plus `onboarding.TOPIC_SYS`,
+  `prompts.CHAT_SYS` and `prompts.VIEW_SYS`); each composes the shared NEUTRALITY block from `prompts.py`.
   `prompts.py` is also the one place for the PROFILE block and the chat prompt assembly.
 - Chat-first backend: `POST /chat/{pid}` (body `{reviewer_id, message}`) -> `chatflow.turn`.
   Until onboarding closes the message goes to the onboarding rules (with a short
@@ -140,7 +140,7 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: .\.venv\Scripts\python.exe -m pytest (988 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
+- Python: .\.venv\Scripts\python.exe -m pytest (1102 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
   HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient; tests/conftest.py
   points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
 - Frontend: node --test tests/loops/*.test.mjs tests/chat/*.test.mjs (77 tests: 12 old-flow, 65
@@ -156,10 +156,13 @@ own phrases back; do not map their answers onto a fixed rubric.
 - Drafting gate (synth.py:224, main.py:314) is intentionally still in place until
   the loosening step. Do not change it earlier.
 - Chat-first frontend built and checked end to end in headless Chrome against the real
-  backend and model. KNOWN ISSUE: the model (anthropic/claude-sonnet-5.5 via OpenRouter)
-  often replies in plain prose, which carries no `views`, so a capture offer is not
-  recorded even when the reply says "Added to ...". A flat `json_schema` response format
-  gave 10/10 JSON in a trial (routed to a different provider; not adopted yet).
+  backend and model. The model (anthropic/claude-sonnet-5.5 via OpenRouter) sometimes replies
+  in plain prose, which carries no `views`. Captures stay honest regardless (`capture.py`):
+  the assistant may only say something was added when the backend recorded it this turn, and
+  when a prose reply follows a stated view a short extraction call (`prompts.VIEW_SYS`, plain
+  `VIEW | section | their words` lines, words must be a verbatim span of the message) lets the
+  app write the capture and confirm it in its own words. A flat `json_schema` response format
+  gave 10/10 JSON in a trial (different provider; deliberately not adopted).
 
 
   ## Frontend principles (chat-first, guided)

@@ -87,6 +87,21 @@ REVIEW GAPS, DRAFTS AND CONFLICTS
 NUDGES
 - Only when THIS TURN contains a NUDGE directive may you nudge, and then at most one, about the reviewer's REVIEW (what the draft has or lacks), never about the paper. Never say what a strength or a weakness should be. If the reviewer is mid-thought, skip it."""
 
+# A short, separate call used when a chat reply carries no structured fields: it picks out what the reviewer stated, in
+# their own words, so the app can keep it. A plain line format (not JSON), because it must work however the provider
+# treats response formats.
+VIEW_SYS = """You pick out what a peer reviewer stated about a paper, so that the app can keep it in their review draft.
+""" + NEUTRALITY + """
+You are given the review-form sections (id: name) and the reviewer's message.
+A stated view is a point the reviewer makes about the paper: a concern, a strength, an observation or a suggestion. Questions, requests, greetings, acknowledgements and talk about how to work are not views.
+For each view write one line, exactly in this form:
+VIEW | <section id> | <their words>
+- <their words> is copied exactly from the message: do not change, add or remove a word, and never paraphrase.
+- <section id> is the id of the best-fitting section from the list.
+- Write at most three lines.
+If the message states no view, write exactly: NONE
+Write nothing else."""
+
 # The output-format instruction goes LAST in the assembled prompt (after the paper, draft and turn notes), where the
 # model is most likely to follow it.
 OUTPUT_FORMAT = """OUTPUT

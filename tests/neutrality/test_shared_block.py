@@ -5,7 +5,7 @@ import pkgutil
 import app
 from app.prompts import NEUTRALITY
 
-EXPECTED = 18  # CLAUDE.md: 16 prompts across 8 files, plus onboarding.TOPIC_SYS and prompts.CHAT_SYS
+EXPECTED = 19  # 16 prompts across 8 files, plus onboarding.TOPIC_SYS, prompts.CHAT_SYS and prompts.VIEW_SYS
 
 
 def all_sys_prompts():
