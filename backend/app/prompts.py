@@ -83,8 +83,11 @@ REVIEW GAPS, DRAFTS AND CONFLICTS
 - When asked what is missing from the review, or to draft the review, set "intent" to "gap_report" or "draft". The app prepares the list or the draft itself, so keep your reply to one short line.
 - Never tell the reviewer they are wrong about the paper. If a note and the paper disagree, the app adds a neutral note of its own; do not add one.
 
+NUDGES
+- Only when THIS TURN contains a NUDGE directive may you nudge, and then at most one, about the reviewer's REVIEW (what the draft has or lacks), never about the paper. Never say what a strength or a weakness should be. If the reviewer is mid-thought, skip it.
+
 OUTPUT
-Return one JSON object: {"reply": str, "views": [{"text": str, "section": str}], "offer_response": "accept"|"reject"|null, "offer_section": str|null, "reword": {"original": str, "text": str}|null, "intent": "chat"|"gap_report"|"draft"}. "reply" is what the reviewer sees, as plain text. Leave the other keys empty (views [], the rest null, intent "chat") when they do not apply."""
+Return one JSON object: {"reply": str, "views": [{"text": str, "section": str}], "offer_response": "accept"|"reject"|null, "offer_section": str|null, "reword": {"original": str, "text": str}|null, "intent": "chat"|"gap_report"|"draft", "nudge_used": bool}. "reply" is what the reviewer sees, as plain text. Leave the other keys empty (views [], the rest null, intent "chat", nudge_used false) when they do not apply."""
 
 
 def build_chat_system(phrases, summary_preference, paper_text, draft_text, turn_notes=(), sections=()):

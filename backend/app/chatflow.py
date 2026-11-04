@@ -15,7 +15,7 @@ import logging
 import re
 import time
 
-from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, pointers
+from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers
 from .llm import _chat
 from .prompts import build_chat_system, build_chat_messages
 from .verify import norm
@@ -216,6 +216,35 @@ def resolve_by_rule(pid, st, message, names):
     return None
 
 
+def resolve_nudge(pid, st, message, sections):
+    """What became of the nudge offered last turn: dismissed (an explicit "not now"/"no"), followed (they went
+    there), or ignored. Two ignores count as a dismissal (see store.fold_chat)."""
+    sid = ((st["last_assistant"] or {}).get("meta") or {}).get("nudge")
+    if not sid or not st["nudges"].get(sid, {}).get("pending"):
+        return None
+    msg = message.strip()
+    if nudges.NOT_NOW.search(msg) or chat.NO.match(msg):
+        outcome = "dismissed"
+    elif sid in nudges.mentions(msg, sections) or chat.YES.match(msg):
+        outcome = "followed"
+    else:
+        outcome = "ignored"
+    store.log(pid, "nudge_resolved", {"section": sid, "outcome": outcome})
+    return outcome
+
+
+def choose_nudge(pid, spans, view, phrases, st, message, ruled, wants_decline):
+    """The nudge this turn may carry, or None. Never: right after a judgment decline, on a decline, twice in a row,
+    or away from a natural pause. (Never during onboarding: that is a different code path.)"""
+    last = (st["last_assistant"] or {}).get("meta") or {}
+    if wants_decline or last.get("declined") or last.get("nudge"):
+        return None
+    if not nudges.natural_pause(message, just_answered_offer=bool(ruled)):
+        return None
+    reading = ((view["fields"] or {}).get("reading_order") or {}).get("value")
+    return nudges.pick_nudge(review_state(pid, spans), reading, phrases.get("hardest_part"), st["nudges"])
+
+
 def valid_views(j, message, existing, names):
     """Views the model reported that really are verbatim spans of the reviewer's message and are new."""
     out, seen = [], {norm(v["text"]) for v in existing.values()}
@@ -277,13 +306,19 @@ def turn(pid, rid, message, spans):
     st = store.chat_state(pid)
     variant = sum(1 for h in hist if h["role"] == "assistant")
     out = {"mode": "chat", "capture": None, "resolved": None, "reword": None, "conflicts": [], "gaps": None,
-           "drafted": None}
+           "drafted": None, "nudge": None}
     meta = {}
 
     ruled = resolve_by_rule(pid, st, message, names)  # a bare "yes"/"no" to the capture offered last turn
     if ruled:
         out["resolved"] = {"outcome": ruled[0], "text": ruled[2]["text"]}
-        st = store.chat_state(pid)
+    sections = [{"id": c["id"], "name": c["name"]} for c in criteria.items()]
+    previous = st["last_assistant"]                      # the turn before this message, for the nudge rules
+    resolve_nudge(pid, st, message, sections)            # what became of the nudge offered last turn
+    for sid in nudges.promises(message, sections):       # "I'll cover the ethics part later"
+        if sid not in st["promised"]:
+            store.log(pid, "section_promised", {"section": sid})
+    st = dict(store.chat_state(pid), last_assistant=previous)
 
     if GAP_REQ.search(message):
         out["reply"], out["gaps"] = gap_reply(pid, spans, variant)
@@ -314,6 +349,9 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
         notes.append(f"Last turn you offered to add “{offered['text']}” under "
                      f"{names.get(offered['section'], 'their draft')}. If this message answers that offer, set "
                      "offer_response.")
+    nudge = choose_nudge(pid, spans, view, phrases, st, message, ruled, wants_decline)
+    if nudge:
+        notes.append(nudges.nudge_note(nudge))
     system = build_chat_system(phrases, pref, paper_text(spans), draft_text(pid), notes,
                                sections=list(names.items()))
     reviewer_texts = [h["text"] for h in hist if h["role"] == "user"] + [message]
@@ -362,7 +400,18 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
             out["conflicts"] = conflict_notes(made[1]["text"], spans)
             if out["conflicts"]:
                 reply += "\n\n" + "\n".join(c["text"] for c in out["conflicts"])
+        if nudge and j.get("nudge_used") is True and not out["capture"] and nudge_in(reply, nudge):
+            store.log(pid, "nudge_offered", {"section": nudge["section"], "kind": nudge["kind"]})
+            meta["nudge"] = nudge["section"]
+            out["nudge"] = {"section": nudge["section"], "label": nudge["label"], "kind": nudge["kind"]}
     out["reply"] = reply
+
+
+def nudge_in(reply, nudge):
+    """Did the reply actually carry the nudge (does it name the section)? Only then is it tracked as offered."""
+    sec = {"id": nudge["section"], "name": nudge["label"]}
+    low = reply.lower()
+    return any(re.search(r"\b" + re.escape(w), low) for w in nudges.section_words(sec))
 
 
 def call_model(msgs):

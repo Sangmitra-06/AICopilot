@@ -176,10 +176,22 @@ def onboarding(reviewer):
 def fold_chat(evs):
     """Pure replay of chat events into the conversation's review-side state: what the reviewer said, which
     captures were offered/accepted/rejected, what they promised to cover, and the last assistant turn."""
-    st = {"views": {}, "promised": [], "last_assistant": None}
+    st = {"views": {}, "promised": [], "last_assistant": None, "nudges": {}}
     for e in evs:
         t, p = e["type"], e["payload"]
-        if t == "view_stated":
+        if t == "nudge_offered":
+            n = st["nudges"].setdefault(p["section"], {"offered": 0, "ignored": 0, "dismissed": False, "pending": False})
+            n["offered"] += 1
+            n["pending"] = True
+        elif t == "nudge_resolved":
+            n = st["nudges"].setdefault(p["section"], {"offered": 0, "ignored": 0, "dismissed": False, "pending": False})
+            n["pending"] = False
+            if p["outcome"] == "dismissed":
+                n["dismissed"] = True
+            elif p["outcome"] == "ignored":
+                n["ignored"] += 1
+                n["dismissed"] = n["dismissed"] or n["ignored"] >= 2  # ignored twice counts as dismissed
+        elif t == "view_stated":
             st["views"][p["vid"]] = {"text": p["text"], "section": p.get("section", ""), "offered": False, "outcome": None}
         elif t == "capture_offered" and p["vid"] in st["views"]:
             st["views"][p["vid"]]["offered"] = True
