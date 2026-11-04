@@ -1,0 +1,69 @@
+{
+  "source": {
+    "venue": "ACL Rolling Review",
+    "cycle": "unspecified",
+    "status": "placeholder, replace with official guidelines"
+  },
+  "criteria": [
+    {
+      "id": "summary",
+      "label": "Paper summary",
+      "description": "Say in your own words what this paper is about. The summary should help the area chair understand the topic of the work and spot any misunderstandings.",
+      "menu": false
+    },
+    {
+      "id": "strengths",
+      "label": "Summary of strengths",
+      "description": "Give the main reasons this paper deserves to be published at a selective venue.",
+      "menu": false
+    },
+    {
+      "id": "weaknesses",
+      "label": "Summary of weaknesses",
+      "description": "Describe the concerns that would make you prefer other strong submissions over this one.",
+      "menu": false
+    },
+    {
+      "id": "comments",
+      "label": "Comments, suggestions and typos",
+      "description": "List suggestions for improving the paper, and any typos, that are separate from the concerns you raised above.",
+      "menu": false
+    },
+    {
+      "id": "soundness",
+      "label": "Soundness",
+      "description": "Does the paper state its scientific claims clearly, and does it back them up well enough? Choose the score that matches your view.",
+      "menu": true
+    },
+    {
+      "id": "excitement",
+      "label": "Excitement",
+      "description": "How enthusiastic are you about this paper being accepted? This is more subjective than soundness. It can come from the ideas, the results, or how useful the work is to the community.",
+      "menu": true
+    },
+    {
+      "id": "overall",
+      "label": "Overall assessment",
+      "description": "Give your overall recommendation using the scale. For Findings, soundness and reproducibility matter most. For the main conference, novelty and impact can also count. If you recommend considering the paper for an award, say briefly why.",
+      "menu": false
+    },
+    {
+      "id": "confidence",
+      "label": "Confidence",
+      "description": "How confident are you in your assessment, given your own expertise and how carefully you read the paper and the related work?",
+      "menu": false
+    },
+    {
+      "id": "reproducibility",
+      "label": "Reproducibility",
+      "description": "Could other researchers reproduce or verify the paper's results from what is provided, such as code, data, and experimental details? Choose the score that matches your view.",
+      "menu": true
+    },
+    {
+      "id": "ethics",
+      "label": "Ethical concerns",
+      "description": "Review the venue's code of ethics and the checklist the authors submitted. If there are ethical issues with this paper, describe them and say how far the authors have addressed them.",
+      "menu": true
+    }
+  ]
+}

@@ -7,11 +7,21 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import re
-from . import ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper, onboarding
+from contextlib import asynccontextmanager
+from . import ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper, onboarding, venue
 from . import brief as brief_mod
 from . import guide as guide_mod
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app):
+    # Fails fast if definitions/venue_criteria.json is missing or malformed, and warns in the logs
+    # while its source is still marked as placeholder text.
+    venue.warn_if_placeholder()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware,
                    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
                    allow_methods=["*"], allow_headers=["*"])

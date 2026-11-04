@@ -92,6 +92,11 @@ own phrases back; do not map their answers onto a fixed rubric.
   `evidence_set`, `onboarding_asked/answered/closed`, `walkthrough_shown` events, keyed
   `reviewer:<id>` in the same event table. Endpoints: `GET /onboarding/{rid}`,
   `POST /onboarding/{rid}/answer`, `GET /profile/{rid}`. Frontend not wired yet.
+- Venue criteria text (onboarding menu and form walkthrough) comes only from
+  `backend/definitions/venue_criteria.json` (loaded by `venue.py`): `source` {venue,
+  cycle, status} plus `criteria` [{id, label, description, menu?}]. It is currently
+  marked "placeholder, replace with official guidelines"; startup logs a warning
+  until that changes. Swapping in official wording is a data change only.
 - Existing neutrality layers (verify.py BANNED regex, judge-model audits in
   guide.py/criterion.py, grounded explanations, draft guard in synth.py) MUST be
   kept. Extend them; do not remove or weaken them.
@@ -107,7 +112,7 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: .\.venv\Scripts\python.exe -m pytest (404 tests + 2 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
+- Python: .\.venv\Scripts\python.exe -m pytest (454 tests + 2 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
 - Frontend: node --test tests/loops/*.test.mjs (12 tests)
 - Build: npm run build in frontend/
 - Setup: python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r backend\requirements.txt

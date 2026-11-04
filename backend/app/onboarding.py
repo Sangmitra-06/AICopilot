@@ -12,7 +12,7 @@ asked and how much scaffolding is given. It never changes the neutrality rule.
 import random
 import re
 
-from . import criteria
+from . import venue
 from .prompts import NEUTRALITY
 
 MAX_TURNS = 14  # reviewer answers, follow-ups included
@@ -66,7 +66,6 @@ FOLLOWUPS = {
     "bad_review_traits": "I didn't catch that as an answer. What makes a review bad, in your view? Or say skip.",
 }
 OTHER = {"id": "other", "label": "Other, in my words"}
-MENU_EXCLUDE = {"summary", "comments", "strengths", "weaknesses", "overall", "confidence"}  # buckets, not criteria
 
 # ---------------------------------------------------------------- skip and unclear answers
 
@@ -323,8 +322,8 @@ def infer_experience(papers, familiarity):
 # ---------------------------------------------------------------- menu and walkthrough
 
 def menu_items():
-    return [{"id": c["id"], "label": c["name"]} for c in criteria.items()
-            if c["id"] not in MENU_EXCLUDE and c.get("style") != "describe"]
+    """The criteria menu entries, straight from definitions/venue_criteria.json (venue wording only)."""
+    return venue.menu_items()
 
 
 def menu_for(reviewer_id, field):
@@ -336,15 +335,12 @@ def menu_for(reviewer_id, field):
 
 
 def walkthrough():
-    cfg = criteria.load()
-    parts = [{"id": c["id"], "name": c["name"], "kind": "score" if c["type"] == "score" else "write",
-              "required": bool(c["required"])} for c in cfg["criteria"]]
-    write = [p["name"] + ("" if p["required"] else " (optional)") for p in parts if p["kind"] == "write"]
-    score = [p["name"] + ("" if p["required"] else " (optional)") for p in parts if p["kind"] == "score"]
-    text = f"The {cfg.get('venue', 'venue')} review form has {len(parts)} parts. You write: " + "; ".join(write) + "."
-    if score:
-        text += " You also give scores for: " + "; ".join(score) + "."
-    text += " You can work on the parts in any order, and I will keep your draft organized by these parts."
+    """A short tour of the review form. Part names and descriptions come only from venue_criteria.json;
+    `text` names the parts in the venue's order and `parts` carries the venue's own wording for each."""
+    parts = venue.parts()
+    text = (f"The {venue.source()['venue']} review form has {len(parts)} parts, in this order: "
+            + "; ".join(p["label"] for p in parts) + ". "
+            "You can work on the parts in any order, and I will keep your draft organized by these parts.")
     return {"text": text, "parts": parts}
 
 
