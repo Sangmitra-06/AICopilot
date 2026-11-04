@@ -4,7 +4,8 @@ The assistant must never say a view was added to the review draft unless the bac
 can only claim that when the app recorded a capture this turn. Otherwise sentences that claim it ("Added to
 Soundness, in your words"), or offer it without an offer behind them ("Want me to add that?"), are removed.
 
-When the app does write a capture itself it confirms it in its own wording (confirmation), never the model's.
+When a reply carries no structured fields, a view found by the extraction call is offered in the app's own wording
+(offer_line), never the model's; nothing is written until the reviewer says yes, as for any offer.
 Pure functions: no model calls, no event log.
 """
 import json
@@ -99,11 +100,12 @@ def scrub(reply, sections, claims_ok=False, offers_ok=False, empty_line=OK):
     return (text or empty_line if removed else text), removed
 
 
-def confirmation(captured):
-    """The app's own words for a capture it wrote. `captured` items have text and label ("" = not placed)."""
-    lines = [f"Added to {c['label']}: “{c['text']}”." if c.get("label")
-             else f"Added to your draft, not placed in a section yet: “{c['text']}”." for c in captured]
-    return "\n".join(lines)
+def offer_line(label, text=None):
+    """The app's own words for offering a capture (never the model's): "Want me to add that to Summary of
+    weaknesses?". `label` is the section's name ("" = not placed in a section). The reviewer's words are quoted only
+    when several views were found, so "that" is unambiguous otherwise."""
+    where = label or "your draft"
+    return f"Want me to add that to {where}?" if text is None else f"Want me to add “{text}” to {where}?"
 
 
 # ------------------------------------------------------------------ reading the extraction call

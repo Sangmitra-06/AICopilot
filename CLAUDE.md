@@ -140,7 +140,7 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: .\.venv\Scripts\python.exe -m pytest (1102 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
+- Python: .\.venv\Scripts\python.exe -m pytest (1109 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
   HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient; tests/conftest.py
   points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
 - Frontend: node --test tests/loops/*.test.mjs tests/chat/*.test.mjs (77 tests: 12 old-flow, 65
@@ -160,9 +160,11 @@ own phrases back; do not map their answers onto a fixed rubric.
   in plain prose, which carries no `views`. Captures stay honest regardless (`capture.py`):
   the assistant may only say something was added when the backend recorded it this turn, and
   when a prose reply follows a stated view a short extraction call (`prompts.VIEW_SYS`, plain
-  `VIEW | section | their words` lines, words must be a verbatim span of the message) lets the
-  app write the capture and confirm it in its own words. A flat `json_schema` response format
-  gave 10/10 JSON in a trial (different provider; deliberately not adopted).
+  `VIEW | section | their words` lines, words must be a verbatim span of the message) finds the
+  view and the app OFFERS it in its own words ("Want me to add that to Summary of weaknesses?"),
+  the same offer-then-yes flow as for JSON replies: nothing is written until the reviewer says
+  yes. A flat `json_schema` response format gave 10/10 JSON in a trial (different provider;
+  deliberately not adopted).
 
 
   ## Frontend principles (chat-first, guided)
