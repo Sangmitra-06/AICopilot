@@ -20,7 +20,6 @@ export const COPY = {
   readyChat: "That's everything I need. Ask me about the paper, or tell me what you think so far.",
   gotPaper: 'Got the paper. Ask me about it, or tell me what you think so far.',
   gotPaperEarly: "Got the paper. Let's finish these few questions first, and then we'll start on it.",
-  switched: 'Switched to the new paper.',
   paperGone: "I can't find that paper any more. Attach it again.",
   chatOff: 'Chat is switched off on this server.',
 }
@@ -230,7 +229,7 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
       loadSpans()
       if (stage === 'attach') { patch({ stage: 'chat' }); if (!(await openPaper())) say(COPY.gotPaper) }
       else if (stage === 'onboarding') say(COPY.gotPaperEarly)
-      else { patch({ draftVersion: state.draftVersion + 1 }); if (!(await openPaper())) say(COPY.switched) }
+      else { patch({ draftVersion: state.draftVersion + 1 }); await openPaper() }
     } finally {
       patch({ busy: false })
     }

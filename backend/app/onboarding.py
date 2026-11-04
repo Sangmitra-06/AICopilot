@@ -83,6 +83,27 @@ QUESTIONISH = re.compile(r"\?\s*$|^\s*(tell me|can you|could you|who are you|wha
 FIRST_PERSON = re.compile(r"\b(i|i'm|i've|i'd|i'll|my|me|mine)\b", re.I)  # cross-field extraction only from "I ..." statements
 
 
+_QUOTE = "'\"“”‘’`"
+_STRAY_QUOTES = re.compile(r"(?<![A-Za-z0-9])[" + _QUOTE + r"]+|[" + _QUOTE + r"]+(?![A-Za-z0-9])")   # not the apostrophe in don't
+_STRAY_SYMBOLS = re.compile(r"[\[\](){}<>*_#|\^~=]+")
+_LEAD_YES = re.compile(r"^\W*(?:(?:yes|yeah|yep|yup|sure|ok|okay|well|um+|uh+|hmm+|so|i guess|i think|probably|definitely|"
+                       r"absolutely|of course)\b\W*)+", re.I)
+_TRAIL_POLITE = re.compile(r"\W*\b(?:please|thanks|thank you)\W*$", re.I)
+
+
+def tidy(text):
+    """An answer as it reads once stray punctuation (a dangling quote, a bracket) and a leading "yes," / "ok," are set
+    aside: "yes, before '" reads as "before". Used only to READ the answer; what the reviewer wrote is what is stored.
+    It never returns an empty string: a bare "yes" stays "yes"."""
+    t = _STRAY_SYMBOLS.sub(" ", _STRAY_QUOTES.sub(" ", text or ""))
+    t = " ".join(t.split())
+    for pat in (_LEAD_YES, _TRAIL_POLITE):
+        cut = pat.sub("", t).strip()
+        if cut:
+            t = cut
+    return t.strip(" ,;:-–—") if t.strip(" ,;:-–—") else t
+
+
 def is_skip(text):
     """True when the answer is only a pass ("not sure", "idk", "skip this one")."""
     t = (text or "").strip()
@@ -202,12 +223,14 @@ def free_text_ok(field, text, check=None):
 NUMWORDS = {"zero": 0, "none": 0, "no": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
             "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15,
             "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "couple": 2, "few": 3, "several": 5,
-            "dozen": 12, "dozens": 24, "many": 20, "lots": 20, "loads": 20, "countless": 30}
+            "dozen": 12, "dozens": 24, "many": 20, "lots": 20, "loads": 20, "countless": 30, "a lot": 20, "plenty": 20,
+            "tons": 30}
 _NUM = r"(\d{1,3}|" + "|".join(sorted(NUMWORDS, key=len, reverse=True)) + r")"
 # Inside a longer sentence "no" and "none" are not counts ("I see no papers on this").
 _NUM_IN_TEXT = r"(\d{1,3}|" + "|".join(sorted(set(NUMWORDS) - {"no", "none"}, key=len, reverse=True)) + r")"
 FIRST_TIME = re.compile(r"\b(first (?:time|review|one|paper)|never (?:reviewed|done (?:one|this|a review))|"
-                        r"haven'?t (?:reviewed|done (?:one|any))|not reviewed|not yet|brand new to reviewing)\b", re.I)
+                        r"haven'?t (?:reviewed|done (?:one|any))|not reviewed|not yet|none yet|my first|"
+                        r"brand new to reviewing)\b", re.I)
 
 
 def _num(tok):
@@ -243,13 +266,19 @@ def x_subarea(text, direct):
     if not direct and not cue:
         return None
     if re.search(r"not (?:my|in my) (?:area|field|subarea)|outside (?:of )?(?:my|the) (?:area|field|expertise)|new to (?:this|the|me)|new for me|"
-                 r"never worked|unfamiliar|not (?:very |really |that )?familiar|no background|a stranger|don'?t (?:really )?know (?:this|the) (?:area|field)", t):
+                 r"never worked|unfamiliar|not (?:very |really |that )?familiar|no background|a stranger|don'?t (?:really )?know (?:this|the) (?:area|field)|"
+                 r"(?:completely|totally|entirely|brand|pretty|quite|fairly|very|really) new|new here|first time (?:in|with|seeing|reading)|"
+                 r"never (?:seen|read|touched|done)|out of my (?:area|depth|wheelhouse|field)|\b(?:beginner|novice|newbie)\b|"
+                 r"don'?t know (?:much|anything|it|this)", t):
         return "unfamiliar"
     if re.search(r"somewhat|a bit|a little|some (?:familiarity|background|experience)|adjacent|related (?:area|field)|"
-                 r"know the basics|read about|moderately|partly|fairly familiar|kind of|sort of", t):
+                 r"know the basics|read about|moderately|partly|fairly familiar|kind of|sort of|so-?so|know (?:it|this|the area) "
+                 r"(?:okay|ok|reasonably|decently)|intermediate", t):
         return "some"
     if re.search(r"i (?:work|publish|do research|study|write papers) (?:in|on)|my (?:main |own )?(?:area|field|subarea|specialty)|"
-                 r"expert|very familiar|deeply|close to my|familiar|know (?:it|this|the area) well|work on (?:this|exactly)", t):
+                 r"expert|very familiar|deeply|close to my|familiar|"
+                 r"know (?:it|this|that|the (?:area|field|topic|subject)|this (?:area|field|topic)|the material)(?: \w+){0,2} well|"
+                 r"well[- ]versed|work on (?:this|exactly)|comfortable with (?:it|this)", t):
         return "familiar"
     return None
 
@@ -439,7 +468,7 @@ def process(st, text, check=None):
     text = (text or "").strip()[:2000]
     evs, outcome = [], "unclear"
     if field in STRUCTURED:
-        val = EXTRACT[field](text, True)
+        val = EXTRACT[field](tidy(text), True)
         if val is not None:
             evs.append(_set(field, val, "answer", text)); outcome = "answered"
         elif is_skip(text):
@@ -467,7 +496,7 @@ def process(st, text, check=None):
         for f, fn in EXTRACT.items():
             if f == field or f in taken or resolved(st, f):
                 continue
-            v = fn(text, False)
+            v = fn(tidy(text), False)
             if v is not None:
                 evs.append(_set(f, v, "extracted", text))
     evs += _experience_event(st, evs)

@@ -100,3 +100,30 @@ test('a summary followed by the first section: both are shown in order and the P
   assert.deepEqual(texts(c).slice(-2), ['The authors report X (Abstract).', sec.reply])
   assert.deepEqual(c.getState().focus.items.map(i => i.id), ['s2'])
 })
+
+// ------------------------------------------------------------------ no "Switched to the new paper."
+
+test('attaching a second paper in the chat says nothing of its own: no "Switched to the new paper."', async () => {
+  const { c } = make({ onboarding: [ok(DONE)], upload: [ok({ paper_id: 'p1' }), ok({ paper_id: 'p2' })],
+    open: [ok({ opened: false, messages: [] })] })
+  await c.start()
+  await c.attach(PDF)
+  const before = texts(c)
+  const version = c.getState().draftVersion
+  await c.attach(PDF)
+  assert.deepEqual(texts(c), before)                                   // nothing new in the thread
+  assert.equal(c.getState().paperId, 'p2')
+  assert.equal(c.getState().draftVersion, version + 1)                 // the draft panel still follows the new paper
+  assert.ok(!texts(c).some(t => /switched to the new paper/i.test(t)))
+  assert.equal(COPY.switched, undefined)
+})
+
+test('a new paper that the app opens shows the opening, not a switch notice', async () => {
+  const { c } = make({ onboarding: [ok(DONE)], upload: [ok({ paper_id: 'p1' }), ok({ paper_id: 'p2' })],
+    open: [ok({ opened: false, messages: [] }), ok({ opened: true, messages: [summary] })] })
+  await c.start()
+  await c.attach(PDF)
+  await c.attach(PDF)
+  assert.equal(texts(c).at(-1), 'The authors report X (Abstract).')
+  assert.ok(!texts(c).some(t => /switched/i.test(t)))
+})
