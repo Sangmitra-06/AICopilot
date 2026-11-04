@@ -173,6 +173,29 @@ def onboarding(reviewer):
     return fold_onboarding(events(reviewer_key(reviewer)))
 
 
+def fold_chat(evs):
+    """Pure replay of chat events into the conversation's review-side state: what the reviewer said, which
+    captures were offered/accepted/rejected, what they promised to cover, and the last assistant turn."""
+    st = {"views": {}, "promised": [], "last_assistant": None}
+    for e in evs:
+        t, p = e["type"], e["payload"]
+        if t == "view_stated":
+            st["views"][p["vid"]] = {"text": p["text"], "section": p.get("section", ""), "offered": False, "outcome": None}
+        elif t == "capture_offered" and p["vid"] in st["views"]:
+            st["views"][p["vid"]]["offered"] = True
+        elif t == "capture_resolved" and p["vid"] in st["views"]:
+            st["views"][p["vid"]]["outcome"] = p["outcome"]
+        elif t == "section_promised" and p["section"] not in st["promised"]:
+            st["promised"].append(p["section"])
+        elif t == "chat_turn" and p.get("kind") == "chat" and p.get("role") == "assistant":
+            st["last_assistant"] = p
+    return st
+
+
+def chat_state(paper):
+    return fold_chat(events(paper))
+
+
 def chat_check_stats(paper):
     """How often the neutrality checks rejected a chat reply for this paper, from the chat_check events."""
     replies = rejected = regenerated = fallbacks = 0

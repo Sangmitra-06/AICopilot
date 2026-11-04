@@ -3,20 +3,41 @@
 POST /chat/{pid} lands in turn(). Until onboarding has closed, the message is routed to the onboarding rules
 (onboarding.py). After that it is a free conversation: the prompt is built from the shared NEUTRALITY block,
 the reviewer's PROFILE, the paper, the review draft and the last 20 turns, in full (prompts.py).
+
+Everything that changes the review is deterministic code over the event log, not model output:
+  - capture: the model reports the reviewer's views as verbatim spans of their message; an accepted offer
+    becomes an ordinary note_added event, so editing and removing it use the existing /events endpoint;
+  - gap reports and drafts are built by the server from the review state;
+  - paper-conflict notes come from pointers.check and a fixed, neutral template.
 """
 import json
 import logging
 import re
+import time
 
-from . import store, onboarding, synth, chat_checks
-from .llm import _chat, JUDGE
+from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, pointers
+from .llm import _chat
 from .prompts import build_chat_system, build_chat_messages
+from .verify import norm
 
 log = logging.getLogger("copilot.chat")
 
 HISTORY_TURNS = 20
 PAPER_CHAR_CAP = 240_000  # about 60k tokens; References are always left out first
 FALLBACK = chat_checks.FALLBACK
+
+APOS = r"['’]?"
+GAP_REQ = re.compile(
+    r"\b(?:what" + APOS + r"s missing|what is missing|what am i missing|what did i (?:miss|forget|leave out)|any gaps|"
+    r"gap report|what" + APOS + r"s (?:left|still open|open)|what haven" + APOS + r"t i (?:covered|done|addressed|written)|"
+    r"am i missing anything|anything (?:i" + APOS + r"?m )?missing|what else (?:is|do i) (?:left|need))\b", re.I)
+DRAFT_REQ = re.compile(
+    r"\b(?:draft (?:it|this|that|my review|the review)|write (?:it|the review|my review) up|put (?:it|this) all "
+    r"together|assemble (?:it|the review|my review)|generate (?:my |the )?(?:review|draft))\b", re.I)
+OFFER_WORDS = re.compile(r"\b(?:add|put|capture|save|include|note|place|file|record|keep)\b", re.I)
+OFFER_WHERE = re.compile(r"\b(?:draft|review|section|under|to your|in your)\b", re.I)
+FACT_CUE = re.compile(r"\d|\b(?:paper|authors?|they|their|section|table|figure|dataset|baseline|model|report\w*|"
+                      r"use[sd]?|train\w*|evaluat\w*|compar\w*|only|all|never|always)\b", re.I)
 
 
 # ------------------------------------------------------------------ what goes into the prompt
@@ -90,6 +111,155 @@ def summary_preference(view):
     return e.get("value") if e else None
 
 
+# ------------------------------------------------------------------ the review as it stands
+
+def review_state(pid, spans):
+    """The review's state for gap detection (see coverage.py). Reads the event log; judges nothing."""
+    cov = synth.coverage(pid)
+    cited = {f"n{n['id']}": n.get("span_ids") or [] for n in store.notes(pid)}
+    cited.update({f"f{f['id']}": f.get("span_ids") or [] for f in store.state(pid)})
+    titles = sorted({s["section"] for s in spans
+                     if s.get("section") and s["section"] not in ("References", "Front matter", "Added from PDF")})
+    st = store.chat_state(pid)
+    return {
+        "sections": [{"id": c["id"], "name": c["name"], "required": c["required"], "type": c["type"]}
+                     for c in criteria.items()],
+        "addressed": {cid: v["addressed"] for cid, v in cov.items()},
+        "skipped": {cid: v["skipped"] for cid, v in cov.items()},
+        "notes": [{"key": i["key"], "field": i["field"], "text": i["text"],
+                   "cited": coverage.cites(i["text"], cited.get(i["key"], ()), titles)}
+                  for i in synth.items(pid) if i["kind"] != "score"],
+        "views": st["views"], "promised": st["promised"], "titles": titles}
+
+
+def gap_reply(pid, spans, variant):
+    report = coverage.gap_report(review_state(pid, spans))
+    return coverage.gap_text(report, variant), report
+
+
+def draft_reply(pid, spans, variant=0):
+    """Draft every section that has content. Missing parts never block it (the gate in synth.make_draft is the
+    old flow's and is left alone); empty sections are simply reported."""
+    names = synth.names()
+    try:
+        synth.sort_items(pid)  # place any unsorted notes; if that fails, draft what is already placed
+    except Exception as e:
+        log.warning("sorting notes before drafting failed: %r", e)
+    its = sorted(synth.items(pid), key=lambda i: i["order"])
+    drafted, empty = [], []
+    for fid, label in names.items():
+        sel = [i for i in its if i["field"] == fid]
+        if not sel:
+            empty.append(label)
+            continue
+        res = synth.draft_field(fid, sel, "smooth")
+        store.log(pid, "draft_generated", {"field": fid, "mode": "smooth", "fallback": res["fallback"],
+                                           "sentences": res["sentences"]})
+        drafted.append(label)
+    unplaced = [i for i in its if not i["field"]]
+    if not drafted:
+        return ("There's nothing in your review yet to draft from. Tell me what you think about the paper and "
+                "I'll add it to your draft as we go."), {"drafted": [], "empty": empty}
+    lead = ["Drafted: ", "I've drafted: ", "The draft now has: "][variant % 3]
+    text = lead + ", ".join(drafted) + ". Open the review draft to read, edit or copy it."
+    if empty:
+        text += " Nothing to draft yet for " + ", ".join(empty) + ", so I left those empty."
+    if unplaced:
+        text += f" {len(unplaced)} of your notes aren't in a section yet, so they aren't in the draft."
+    return text, {"drafted": drafted, "empty": empty}
+
+
+# ------------------------------------------------------------------ captures
+
+def section_id(raw, names):
+    """A review-form section id from what the model (or reviewer) called it, or "" if it is not one."""
+    raw = (raw or "").strip()
+    if raw in names:
+        return raw
+    return chat.lookup().get(raw.lower(), "") if raw else ""
+
+
+def accept_capture(pid, vid, view, section=None):
+    """Put a stated view in the draft: an ordinary note_added event, in the reviewer's own words."""
+    field = section if section is not None else view["section"]
+    nid = max([int(time.time() * 1000)] + [n["id"] + 1 for n in store.notes(pid) if isinstance(n["id"], int)])
+    store.log(pid, "note_added", {"id": nid, "field": field, "text": view["text"], "span_ids": [], "page": None,
+                                  "rect": None, "sentence": "", "revisit": False, "question": "",
+                                  "by": "chat", "view": vid})
+    store.log(pid, "capture_resolved", {"vid": vid, "outcome": "accepted", "note_id": nid})
+    return nid
+
+
+def reject_capture(pid, vid):
+    store.log(pid, "capture_resolved", {"vid": vid, "outcome": "rejected"})
+
+
+def open_offer(st):
+    """The capture offered in the assistant's last turn, if the reviewer has not answered it yet."""
+    last = st["last_assistant"] or {}
+    vid = (last.get("meta") or {}).get("offer")
+    v = st["views"].get(vid) if vid else None
+    return (vid, v) if v and v["outcome"] is None else (None, None)
+
+
+def resolve_by_rule(pid, st, message, names):
+    """A bare yes / no to the open offer. Returns ("accepted"|"rejected", vid, view) or None."""
+    vid, v = open_offer(st)
+    if not v:
+        return None
+    if chat.YES.match(message.strip()):
+        accept_capture(pid, vid, v)
+        return "accepted", vid, v
+    if chat.NO.match(message.strip()):
+        reject_capture(pid, vid)
+        return "rejected", vid, v
+    return None
+
+
+def valid_views(j, message, existing, names):
+    """Views the model reported that really are verbatim spans of the reviewer's message and are new."""
+    out, seen = [], {norm(v["text"]) for v in existing.values()}
+    for v in j.get("views") or []:
+        if not isinstance(v, dict):
+            continue
+        text = " ".join(str(v.get("text", "")).split())
+        if not text or len(text) > 600 or norm(text) not in norm(message) or norm(text) in seen:
+            continue
+        seen.add(norm(text))
+        out.append({"text": text, "section": section_id(v.get("section"), names)})
+    return out
+
+
+def conflict_notes(text, spans):
+    """Neutral notes where the paper's own words differ from a factual statement in the reviewer's note.
+    Never says who is right; non-blocking: any failure just means no note."""
+    if not FACT_CUE.search(text):
+        return []
+    try:
+        found = pointers.check(text, spans)
+    except Exception as e:
+        log.warning("paper-conflict check failed: %r", e)
+        return []
+    by = {s["id"]: s for s in spans}
+    out = []
+    for p in found:
+        s = by.get(p.get("span_id"))
+        if p.get("kind") != "contradicts" or not s:
+            continue
+        sec = s["section"]
+        where = f"Section {sec}" if re.match(r"^\d", sec) else f"The {sec} section"
+        if p.get("lines"):
+            lo, hi = p["lines"][0], p["lines"][1]
+            where += f" (line {lo})" if lo == hi else f" (lines {lo}-{hi})"
+        out.append({"span_id": s["id"], "section": sec, "paper_quote": p["paper_quote"],
+                    "reviewer_phrase": p["reviewer_phrase"],
+                    "text": f"{where} states “{p['paper_quote']}”; your note says "
+                            f"“{p['reviewer_phrase']}”. Want to check?"})
+        if len(out) == 2:
+            break
+    return out
+
+
 # ------------------------------------------------------------------ the turn
 
 def log_chat(pid, role, text, **meta):
@@ -102,47 +272,126 @@ def turn(pid, rid, message, spans):
     if not ob["closed"]:
         return onboarding_turn(pid, rid, message, ob)
     view = onboarding.profile_view(ob)
-    phrases, hist = profile_phrases(view), history_turns(pid)
-    wants_decline = bool(JUDGE.search(message))
-    notes = [chat_checks.DECLINE_NOTE] if wants_decline else []
-    system = build_chat_system(phrases, summary_preference(view), paper_text(spans), draft_text(pid), notes)
-    ctx = {"reviewer_text": " ".join([h["text"] for h in hist if h["role"] == "user"] + [message]
-                                     + list(phrases.values())),
-           "wants_decline": wants_decline, "summary_pref": summary_preference(view),
-           "summary_requested": bool(chat_checks.SUMMARY_REQ.search(message))}
-    reply, info = generate_checked(build_chat_messages(system, hist, message), ctx, phrases)
-    chat_checks.record(pid, store, info)
+    phrases, pref = profile_phrases(view), summary_preference(view)
+    hist, names = history_turns(pid), synth.names()
+    st = store.chat_state(pid)
+    variant = sum(1 for h in hist if h["role"] == "assistant")
+    out = {"mode": "chat", "capture": None, "resolved": None, "reword": None, "conflicts": [], "gaps": None,
+           "drafted": None}
+    meta = {}
+
+    ruled = resolve_by_rule(pid, st, message, names)  # a bare "yes"/"no" to the capture offered last turn
+    if ruled:
+        out["resolved"] = {"outcome": ruled[0], "text": ruled[2]["text"]}
+        st = store.chat_state(pid)
+
+    if GAP_REQ.search(message):
+        out["reply"], out["gaps"] = gap_reply(pid, spans, variant)
+        out["checks"] = {"attempts": 0, "fallback": False}
+        meta["intent"] = "gap_report"
+    elif DRAFT_REQ.search(message):
+        out["reply"], out["drafted"] = draft_reply(pid, spans, variant)
+        out["checks"] = {"attempts": 0, "fallback": False}
+        meta["intent"] = "draft"
+    else:
+        model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled, variant, out, meta)
+
+    out["draft_changed"] = (out["resolved"] or {}).get("outcome") == "accepted" or bool((out["drafted"] or {}).get("drafted"))
     log_chat(pid, "user", message)
-    log_chat(pid, "assistant", reply, declined=wants_decline or bool(chat_checks.DECLINE_MARK.search(reply[:200])))
-    return {"mode": "chat", "reply": reply, "checks": {"attempts": info["attempts"], "fallback": info["fallback"]}}
+    log_chat(pid, "assistant", out["reply"], **meta)
+    return out
+
+
+def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled, variant, out, meta):
+    wants_decline = chat_checks.asks_for_judgment(message)
+    notes = [chat_checks.DECLINE_NOTE] if wants_decline else []
+    vid, offered = open_offer(st)
+    if ruled:
+        did = "added it to their draft" if ruled[0] == "accepted" else "did not add it"
+        notes.append(f"The reviewer just answered your offer to add “{ruled[2]['text']}”: the app {did}. "
+                     "Confirm in a few words and do not offer it again.")
+    elif offered:
+        notes.append(f"Last turn you offered to add “{offered['text']}” under "
+                     f"{names.get(offered['section'], 'their draft')}. If this message answers that offer, set "
+                     "offer_response.")
+    system = build_chat_system(phrases, pref, paper_text(spans), draft_text(pid), notes,
+                               sections=list(names.items()))
+    reviewer_texts = [h["text"] for h in hist if h["role"] == "user"] + [message]
+    ctx = {"reviewer_text": " ".join(reviewer_texts + list(phrases.values())), "wants_decline": wants_decline,
+           "summary_pref": pref, "summary_requested": bool(chat_checks.SUMMARY_REQ.search(message)),
+           "reword_pool": reviewer_texts + [i["text"] for i in synth.items(pid)]}
+    reply, info, j = generate_checked(build_chat_messages(system, hist, message), ctx, phrases)
+    chat_checks.record(pid, store, info)
+    out["checks"] = {"attempts": info["attempts"], "fallback": info["fallback"]}
+    meta["declined"] = wants_decline or bool(chat_checks.DECLINE_MARK.search(reply[:200]))
+    if info["fallback"]:
+        out["reply"] = reply
+        return
+
+    intent = j.get("intent")
+    if intent == "gap_report":
+        reply, out["gaps"] = gap_reply(pid, spans, variant)
+        meta["intent"] = "gap_report"
+    elif intent == "draft":
+        reply, out["drafted"] = draft_reply(pid, spans, variant)
+        meta["intent"] = "draft"
+    else:
+        if not ruled and offered and j.get("offer_response") in ("accept", "reject"):
+            if j["offer_response"] == "accept":
+                sec = section_id(j.get("offer_section"), names) or offered["section"]
+                accept_capture(pid, vid, offered, sec)
+                out["resolved"] = {"outcome": "accepted", "text": offered["text"]}
+            else:
+                reject_capture(pid, vid)
+                out["resolved"] = {"outcome": "rejected", "text": offered["text"]}
+        if isinstance(j.get("reword"), dict):
+            out["reword"] = {"original": j["reword"]["original"], "text": j["reword"]["text"]}
+        new = valid_views(j, message, store.chat_state(pid)["views"], names)
+        made = None
+        for v in new:
+            n = len(store.chat_state(pid)["views"]) + 1
+            v_id = f"v{n}"
+            store.log(pid, "view_stated", {"vid": v_id, "text": v["text"], "section": v["section"]})
+            if made is None and OFFER_WORDS.search(reply) and OFFER_WHERE.search(reply):
+                made = (v_id, v)
+        if made:
+            store.log(pid, "capture_offered", {"vid": made[0]})
+            meta["offer"] = made[0]
+            out["capture"] = {"id": made[0], "text": made[1]["text"], "section": made[1]["section"],
+                              "label": names.get(made[1]["section"], "")}
+            out["conflicts"] = conflict_notes(made[1]["text"], spans)
+            if out["conflicts"]:
+                reply += "\n\n" + "\n".join(c["text"] for c in out["conflicts"])
+    out["reply"] = reply
 
 
 def call_model(msgs):
-    """One model call -> (parsed reply text, raw output). Raises ValueError if the output is not usable."""
+    """One model call -> (parsed JSON, reply text, raw output). Raises ValueError if the output is not usable."""
     raw = _chat(msgs)
-    reply = str(json.loads(raw).get("reply") or "").strip()
-    if not reply:
+    j = json.loads(raw)
+    reply = str(j.get("reply") or "").strip()
+    if not isinstance(j, dict) or not reply:
         raise ValueError("no reply in the model output")
-    return reply, raw
+    return j, reply, raw
 
 
 def generate_checked(msgs, ctx, phrases):
     """Every reply passes chat_checks.reply_errors. On failure: regenerate once, then a short neutral fallback.
-    Returns (reply, info) where info feeds the chat_check log."""
+    Returns (reply, info, parsed json) where info feeds the chat_check log."""
     errs, raw = [], ""
     for attempt in (1, 2):
         try:
-            reply, raw = call_model(msgs)
-            errs = chat_checks.reply_errors(reply, ctx)
+            j, reply, raw = call_model(msgs)
+            errs = chat_checks.reply_errors(reply, {**ctx, "reword": j.get("reword")})
         except Exception as e:  # a down or garbling model is a failed attempt, never a 500
             log.warning("chat model call failed: %r", e)
-            reply, errs = "", ["the model call failed or returned unusable output"]
+            j, reply, errs = {}, "", ["the model call failed or returned unusable output"]
         if not errs:
-            return reply, {"attempts": attempt, "fallback": False, "errors": []}
+            return reply, {"attempts": attempt, "fallback": False, "errors": []}, j
         msgs = msgs + [{"role": "assistant", "content": raw or "{}"},
                        {"role": "user", "content": chat_checks.correction(errs)}]
     fallback = chat_checks.decline_fallback(phrases) if ctx.get("wants_decline") else chat_checks.FALLBACK
-    return fallback, {"attempts": 2, "fallback": True, "errors": errs}
+    return fallback, {"attempts": 2, "fallback": True, "errors": errs}, {}
 
 
 def onboarding_turn(pid, rid, message, st):

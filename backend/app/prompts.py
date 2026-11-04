@@ -72,16 +72,29 @@ SUMMARIES
 JUDGMENT QUESTIONS
 - If the reviewer asks for your judgment ("is this novel?", "do you agree?", "should I accept?", "is the comparison fair?"), your first sentence declines in one short sentence. Then redirect to the reviewer's own criteria and evidence, using their own words from the profile when they fit, and then be useful: offer to locate what the paper says, explain a term, or look at it together. No lecturing and no repeated boilerplate.
 
+CAPTURING THE REVIEWER'S VIEWS
+- When the reviewer states a view or point about the paper (not a question, not a request), list it in "views": "text" is an exact span copied from THEIR message, "section" is the id of the best-fitting review-form section from the list below. In your reply, offer in a few words to add it to that section of their draft, in their own words. Offer only for views they actually stated, never for something you thought of yourself.
+- When THIS TURN says you offered a capture and the reviewer's message answers it, set "offer_response" to "accept" or "reject" (and "offer_section" if they name a different section), and confirm in a few words. Do not offer again for a view they already answered.
+
+REWORDING
+- If asked to reword, tighten or soften one of the reviewer's comments, set "reword" to {"original": the exact text of their comment, "text": your version} and include your version in your reply, word for word. Improve clarity and tone only. Keep their stance: keep every evaluative word they used (weak, unclear, sloppy, and so on), every hedge (might, seems, I think), every negation and every number, and add none. Do not make it harsher or gentler in what it claims.
+
+REVIEW GAPS, DRAFTS AND CONFLICTS
+- When asked what is missing from the review, or to draft the review, set "intent" to "gap_report" or "draft". The app prepares the list or the draft itself, so keep your reply to one short line.
+- Never tell the reviewer they are wrong about the paper. If a note and the paper disagree, the app adds a neutral note of its own; do not add one.
+
 OUTPUT
-Return one JSON object: {"reply": str}. "reply" is what the reviewer sees, as plain text."""
+Return one JSON object: {"reply": str, "views": [{"text": str, "section": str}], "offer_response": "accept"|"reject"|null, "offer_section": str|null, "reword": {"original": str, "text": str}|null, "intent": "chat"|"gap_report"|"draft"}. "reply" is what the reviewer sees, as plain text. Leave the other keys empty (views [], the rest null, intent "chat") when they do not apply."""
 
 
-def build_chat_system(phrases, summary_preference, paper_text, draft_text, turn_notes=()):
+def build_chat_system(phrases, summary_preference, paper_text, draft_text, turn_notes=(), sections=()):
     """One turn's system prompt: static instructions (which carry NEUTRALITY), the PROFILE block, the paper,
-    the review draft as it stands, and any notes that apply to this turn only."""
+    the review draft as it stands, the review-form sections, and any notes that apply to this turn only."""
     parts = [CHAT_SYS, profile_block(phrases, summary_preference),
              "THE PAPER (spans are labeled [id]; cite sections and lines from here):\n" + paper_text,
              "THE REVIEW DRAFT SO FAR (the reviewer's own words, organized by review-form section):\n" + draft_text]
+    if sections:
+        parts.append("REVIEW-FORM SECTIONS (use these ids):\n" + "\n".join(f"- {i}: {n}" for i, n in sections))
     if turn_notes:
         parts.append("THIS TURN:\n" + "\n".join(f"- {n}" for n in turn_notes))
     return "\n\n".join(parts)

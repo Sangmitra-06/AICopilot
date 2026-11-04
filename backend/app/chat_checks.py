@@ -64,6 +64,18 @@ SUMMARY_MARK = re.compile(r"\b(?:summary of the paper|in summary|to summari[sz]e
 POINTER = re.compile(r"\((?:sections?|sec\.|lines?|§|abstract|appendix|table|figure|page)[^)]*\)|\bsections? \d|"
                      r"§\s*\d|\blines? \d|\bin the abstract\b|\bthe abstract\b", re.I)
 
+# JUDGE was written for questions. In chat, reviewers also STATE views ("The baseline is weak."), which is not a
+# request for the assistant's judgment, so a message only counts as one when it is also question-shaped or
+# addresses the assistant directly.
+QUESTION_LIKE = re.compile(r"\?|^\s*(?:is|are|was|were|do|does|did|would|should|can|could|will|shall|what|how|why|"
+                           r"which|am i|tell me|give me your)\b|\bdo you (?:agree|think|feel|believe)\b", re.I)
+
+
+def asks_for_judgment(message):
+    """Is this message a request for the assistant's own judgment (as opposed to the reviewer stating theirs)?"""
+    return bool(JUDGE.search(message)) and bool(QUESTION_LIKE.search(message))
+
+
 DECLINE_NOTE = ("The reviewer's message looks like a request for your own judgment. Your first sentence must "
                 "decline in one short sentence (say it is their call, not yours). Then point them back to their "
                 "own criteria and evidence, using their words from the profile when they fit, and then be useful: "
@@ -114,6 +126,56 @@ def questions(reply):
     return [s for s in SENT.split(QUOTED.sub(" ", reply)) if s.strip().endswith("?")]
 
 
+# A reworded comment must keep the reviewer's stance: the same evaluative words, hedges, intensifiers,
+# negations and numbers, with none added.
+HEDGES = set("might may maybe perhaps possibly probably seems seem appears appear somewhat slightly rather fairly "
+             "quite arguably likely unlikely think thinks believe feel suspect guess suppose sort kind".split())
+INTENSIFIERS = set("very extremely highly completely totally entirely clearly obviously definitely certainly too "
+                   "really absolutely hardly barely strongly".split())
+STANCE_ADJ = set("poor sloppy thin vague unclear confusing insufficient inadequate lacking missing unconvincing "
+                 "unjustified unsupported incomplete shallow superficial incremental trivial naive misleading wrong "
+                 "bad great nice excellent impressive interesting clear careful thorough rigorous weak strong flawed "
+                 "novel solid sound fair convincing important significant original reasonable appropriate justified "
+                 "adequate sufficient enough good worthwhile".split())
+NEGATION = re.compile(r"\b(?:not|no|never|none|neither|nor|without|cannot)\b|n(?:'|\u2019)t\b", re.I)
+NUMBERS = re.compile(r"\d+(?:\.\d+)?")
+
+
+def stance_words(text):
+    return {w for w in words(text) if w in HEDGES or w in INTENSIFIERS or w in STANCE_ADJ}
+
+
+def stance_errors(original, rewrite):
+    """Why `rewrite` is not the same comment in other words (empty list: it keeps the stance)."""
+    errs, a, b = [], stance_words(original), stance_words(rewrite)
+    if a - b:
+        errs.append("the rewrite dropped the reviewer's own words: " + ", ".join(sorted(a - b)))
+    if b - a:
+        errs.append("the rewrite added words that change the stance: " + ", ".join(sorted(b - a)))
+    if len(NEGATION.findall(original)) != len(NEGATION.findall(rewrite)):
+        errs.append("the rewrite changes the negations (not/no/never) in the comment")
+    if sorted(NUMBERS.findall(original)) != sorted(NUMBERS.findall(rewrite)):
+        errs.append("the rewrite changes the numbers in the comment")
+    return errs
+
+
+def reword_errors(reword, reply, pool):
+    """Checks on the model's "reword": {"original", "text"} object. `pool` is every text the reviewer wrote."""
+    if not isinstance(reword, dict) or not str(reword.get("original", "")).strip() or not str(reword.get("text", "")).strip():
+        return ["reword needs both the reviewer's original comment and your version"]
+    orig, text = str(reword["original"]), str(reword["text"])
+    errs = []
+    if not any(_squash(orig) in _squash(p) for p in pool):
+        errs.append("the 'original' is not the reviewer's own text; copy their comment exactly")
+    if text not in reply:
+        errs.append("put your reworded version in the reply, word for word")
+    return errs + stance_errors(orig, text)
+
+
+def _squash(t):
+    return re.sub(r"\s+", " ", (t or "").strip().lower())
+
+
 def reply_errors(reply, ctx):
     """Why this reply may not be shown (empty list: it may). ctx keys: reviewer_text, wants_decline,
     summary_pref, summary_requested."""
@@ -123,6 +185,12 @@ def reply_errors(reply, ctx):
     if len(reply) > 6000:
         return ["the reply is too long; keep it to what the reviewer needs"]
     errs, lic = [], words(ctx.get("reviewer_text", ""))
+    reword = ctx.get("reword")
+    if reword:
+        # The reworded comment is the reviewer's own wording, checked separately for stance; the rest of the
+        # reply is scanned as usual.
+        errs += reword_errors(reword, reply, ctx.get("reword_pool", []))
+        reply = reply.replace(str(reword.get("text", "")), " ") if isinstance(reword, dict) else reply
     hits = banned_hits(reply, lic)
     if hits:
         errs.append("evaluative wording (" + ", ".join(sorted(set(hits))) + "): describe, do not rate")

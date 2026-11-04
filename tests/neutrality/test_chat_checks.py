@@ -85,6 +85,25 @@ def test_summaries_are_only_volunteered_when_the_profile_allows_it_and_need_poin
     assert errs("Here's a short summary: the authors report accuracy on three datasets.", summary_requested=True)
 
 
+@pytest.mark.parametrize("msg", [
+    "is this novel?", "do you agree?", "should I accept", "is the baseline comparison fair?",
+    "The baseline is weak. Do you agree", "what score would you give it", "is this a good paper?",
+])
+def test_requests_for_the_assistants_judgment_are_recognised(msg):
+    assert cc.asks_for_judgment(msg), msg
+
+
+@pytest.mark.parametrize("msg", [
+    "The baseline is weak and the writing is sloppy, I think.",     # the reviewer stating their view
+    "I think this is a good paper.",
+    "reword this: The comparison is not fair.",
+    "The evaluation is not sound and the results are unconvincing.",
+    "why did they reject outliers?", "what does valid mean?", "where do they state the contribution?",
+])
+def test_the_reviewer_stating_their_own_view_is_not_a_judgment_request(msg):
+    assert not cc.asks_for_judgment(msg), msg
+
+
 # ------------------------------------------------------------------ regenerate once, then the fallback
 
 def post(c, message, rid="rev"):

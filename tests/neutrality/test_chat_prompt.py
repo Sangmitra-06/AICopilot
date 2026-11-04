@@ -87,8 +87,8 @@ def test_messages_are_system_then_history_in_full_then_the_new_message():
 
 def test_turn_notes_appear_only_when_given():
     base = build_chat_system({}, None, "P", "D")
-    assert "THIS TURN" not in base
-    assert "- do the thing" in build_chat_system({}, None, "P", "D", ["do the thing"])
+    assert "\nTHIS TURN:\n" not in base
+    assert "\nTHIS TURN:\n- do the thing" in build_chat_system({}, None, "P", "D", ["do the thing"])
 
 
 # ------------------------------------------------------------------ the endpoint
