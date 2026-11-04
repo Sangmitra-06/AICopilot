@@ -100,9 +100,11 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: C:\Users\sangm\OneDrive - Brock University\ReviewerAISlop\.venv\Scripts\python.exe -m pytest (43 tests; any live model call must fail loudly)
+- Python: .\.venv\Scripts\python.exe -m pytest (43 tests; any live model call must fail loudly)
 - Frontend: node --test tests/loops/*.test.mjs (12 tests)
 - Build: npm run build in frontend/
+- Setup: python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r backend\requirements.txt
+- Project lives at C:\dev\ReviewerAISlop (outside OneDrive; OneDrive breaks SQLite and node_modules)
 
 ## Status
 - Prompt A (loop fixes) done. Flow counters (follow-up cap, I-don't-know) are
