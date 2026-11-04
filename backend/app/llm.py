@@ -27,8 +27,40 @@ Rules:
 7. When answering a question, include only sentences that answer it. No extra context.
 If the question cannot be answered from the spans or pages, return {"sentences":[]}."""
 
-JUDGE = re.compile(r"\b(good|bad|solid|sound|convincing|valid|fair|worth|important|weak|strong|"
-                   r"flawed|accept|reject|novel|should i)\b", re.I)
+# JUDGE decides whether a reviewer's question asks the assistant for its own judgment.
+# It used to flag any evaluative word, which refused "why did they reject outliers?" and
+# "what does valid mean?" and missed "do you agree?" and "is this adequate?". Now it flags the
+# FORM of the question: an opinion or decision request, or an evaluative word in predicate
+# position ("is X <word>?"). Definitions ("what does X mean") are never judgment requests.
+_EVAL = (r"(?<!statistically )(?:good|bad|solid|sound|convincing|persuasive|compelling|impressive|valid|"
+         r"(?:un)?fair|worth\w*|important|weak|strong|flawed|novel|original|significant|adequate|sufficient|"
+         r"enough|thorough|rigorous|reasonable|appropriate|justified|interesting|incremental|acceptable|"
+         r"publishable|ok|okay)")
+_ASK = r"(?:agree|disagree|accept|reject|score|rate|recommend)"
+_OPINION = "|".join([
+    r"\b(?:do|don't|would|wouldn't) you (?:agree|disagree)\b",
+    r"\bagree with (?:me|my|this)\b",
+    r"\b(?:should|shall|can|could|would|will|do) (?:i|we)\b[^?]{0,40}\b" + _ASK + r"\b",
+    r"\b(?:would|will|do|did|could) you (?:\w+ )?" + _ASK + r"\b",
+    r"\bwhat (?:score|rating|recommendation|verdict|decision)\b[^?]*\byou\b",
+    r"\bwhat would you (?:score|rate|give|decide)\b",
+    r"\bam i (?:right|wrong|correct|being (?:fair|harsh|unfair))\b",
+    r"\b(?:in|what is|what's) your (?:opinion|view|judg\w+|verdict|take|assessment)\b",
+    r"\b(?:do|would|did|don't) you (?:think|feel|believe|say|consider|find)\b[^?]*\b" + _EVAL + r"\b",
+    r"\b(?:accept|reject)(?:/|\s+or\s+)(?:accept|reject)\b",
+    r"\b(?:is|was) (?:this|it|the paper) (?:an? )?(?:accept|reject|borderline)\b",
+    r"\bborderline\b",
+    # "is this a good paper?", "is it a solid contribution?": subject + article + evaluative word.
+    # (Bare "is the strong baseline X?" is not matched: no article before the word.)
+    r"\b(?:is|was|are|were) (?:this|it|that|the (?:paper|work|method|approach|contribution|result|results|idea|study|submission))\b"
+    r"[^?]{0,15}\b(?:an?|the)\s+" + _EVAL + r"\b",
+    r"\b(?:is|was) (?:it|this|that)\b[^?]{0,10}\bworth\b",
+    r"\bwhat(?:'s| is| are)\s+(?:\w+\s+){0,2}(?:good|bad|strong|weak|great|novel|wrong|flawed)\s+(?:about|in|with)\b",
+])
+_PREDICATE = (r"\b(?:is|are|was|were|isn't|aren't|does|do|did|seems?|looks?|feels?|be)\b[^?]{0,80}?\b" + _EVAL +
+              r"\s*(?:\?|$|enough\b|for\b|to\b|and\b|or\b|,|\.)|\bhow " + _EVAL + r"\b")
+_DEFINITION = r"\b(?:mean|means|meant|defin\w+|stands? for)\b"
+JUDGE = re.compile(_OPINION + r"|^(?!.*" + _DEFINITION + r").*?(?:" + _PREDICATE + r")", re.I | re.S)
 
 
 def _chat(msgs):
