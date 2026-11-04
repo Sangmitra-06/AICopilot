@@ -1,4 +1,4 @@
-import base64, hashlib, os
+import base64, hashlib, logging, os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import pymupdf
@@ -461,6 +461,25 @@ def profile_ep(rid: str):
     return onboarding.profile_view(store.onboarding(rid))
 
 
+FLOWS = ("chat", "guided")
+
+
+def flow_mode():
+    """Which flow this backend serves: "chat" (default, POST /chat) or "guided" (the old part-by-part flow).
+    Set COPILOT_FLOW=guided to turn /chat off. The old flow's endpoints are always registered and unchanged;
+    the frontend picks its own flow with ?mode=guided."""
+    m = os.environ.get("COPILOT_FLOW", "chat").strip().lower()
+    if m not in FLOWS:
+        logging.getLogger("copilot").warning("COPILOT_FLOW=%r is not one of %s; using 'chat'", m, FLOWS)
+        return "chat"
+    return m
+
+
+@app.get("/config")
+def config_ep():
+    return {"flow": flow_mode(), "chat_enabled": flow_mode() == "chat", "modes": list(FLOWS)}
+
+
 class ChatReq(BaseModel): reviewer_id: str; message: str = Field(min_length=1, max_length=20000)
 
 
@@ -471,6 +490,10 @@ def have_paper(pid):
 @app.post("/chat/{pid}")
 def chat_ep(pid: str, r: ChatReq):
     """Chat-first: one message in, one free-form reply out (onboarding first, then conversation)."""
+    if flow_mode() != "chat":
+        return JSONResponse({"error": "chat_disabled", "flow": flow_mode(),
+                             "message": "This backend is serving the old guided flow (COPILOT_FLOW=guided)."},
+                            status_code=409)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", r.reviewer_id):
         raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
     if not have_paper(pid):
