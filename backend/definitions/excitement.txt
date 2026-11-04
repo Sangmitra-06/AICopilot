@@ -1,0 +1,2 @@
+(Stand-in wording, not the official text. Replace it with the venue's own.)
+How enthusiastic are you about this paper being accepted? This is more subjective than soundness. It can come from the ideas, the results, or how useful the work is to the community.

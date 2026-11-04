@@ -1,0 +1,2 @@
+(Stand-in wording, not the official text. Replace it with the venue's own.)
+Could other researchers reproduce or verify the paper's results from what is provided, such as code, data, and experimental details? Choose the score that matches your view.

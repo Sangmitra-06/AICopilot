@@ -1,0 +1,23 @@
+@"
+# backend: secrets, data, and environment
+backend/.env
+backend/copilot.db
+backend/data/
+backend/.venv/
+**/__pycache__/
+*.pyc
+
+# frontend: Vite defaults
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+logs
+*.log
+
+# editors and system files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+"@ | Set-Content .gitignore -Encoding ascii

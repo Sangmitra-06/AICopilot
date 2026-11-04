@@ -1,0 +1,32 @@
+{
+  "venue": "ACL Rolling Review",
+  "version": "",
+  "source": "https://aclrollingreview.org/reviewform",
+  "gate": true,
+  "fact_gate": true,
+  "allow_dispute": true,
+  "criteria": [
+    {"id": "summary", "name": "Paper summary", "tab": "Summary", "type": "text", "required": true, "style": "describe"},
+    {"id": "strengths", "name": "Summary of strengths", "tab": "Strengths", "type": "text", "required": true, "list": true},
+    {"id": "weaknesses", "name": "Summary of weaknesses", "tab": "Weaknesses", "type": "text", "required": true, "list": true},
+    {"id": "comments", "name": "Comments, suggestions and typos", "tab": "Comments", "type": "text", "required": false, "list": true, "style": "describe"},
+    {"id": "soundness", "name": "Soundness", "tab": "Soundness", "type": "score", "required": true,
+     "scale": [{"value": "5", "label": ""}, {"value": "4", "label": ""}, {"value": "3", "label": ""},
+               {"value": "2", "label": ""}, {"value": "1", "label": ""}]},
+    {"id": "excitement", "name": "Excitement", "tab": "Excitement", "type": "score", "required": true,
+     "scale": [{"value": "5", "label": ""}, {"value": "4", "label": ""}, {"value": "3", "label": ""},
+               {"value": "2", "label": ""}, {"value": "1", "label": ""}]},
+    {"id": "overall", "name": "Overall assessment", "tab": "Overall", "type": "score", "required": true,
+     "scale": [{"value": "5", "label": "Consider for award"}, {"value": "4.5", "label": "Borderline award"},
+               {"value": "4", "label": "Conference"}, {"value": "3.5", "label": "Borderline conference"},
+               {"value": "3", "label": "Findings"}, {"value": "2.5", "label": "Borderline findings"},
+               {"value": "2", "label": ""}, {"value": "1.5", "label": ""}, {"value": "1", "label": ""}]},
+    {"id": "confidence", "name": "Confidence", "tab": "Confidence", "type": "score", "required": true,
+     "scale": [{"value": "5", "label": ""}, {"value": "4", "label": ""}, {"value": "3", "label": ""},
+               {"value": "2", "label": ""}, {"value": "1", "label": ""}]},
+    {"id": "reproducibility", "name": "Reproducibility", "tab": "Reproducibility", "type": "score", "required": false,
+     "scale": [{"value": "5", "label": ""}, {"value": "4", "label": ""}, {"value": "3", "label": ""},
+               {"value": "2", "label": ""}, {"value": "1", "label": ""}]},
+    {"id": "ethics", "name": "Ethical concerns", "tab": "Ethics", "type": "text", "required": false}
+  ]
+}

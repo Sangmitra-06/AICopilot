@@ -1,0 +1,2 @@
+(Stand-in wording, not the official text. Replace it with the venue's own.)
+Give your overall recommendation using the scale. For Findings, soundness and reproducibility matter most. For the main conference, novelty and impact can also count. If you recommend considering the paper for an award, say briefly why.
