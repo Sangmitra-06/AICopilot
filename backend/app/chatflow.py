@@ -15,7 +15,7 @@ import logging
 import re
 import time
 
-from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers, capture
+from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers, capture, cites
 from .llm import _chat
 from .prompts import build_chat_system, build_chat_messages
 from . import prompts
@@ -323,7 +323,7 @@ def turn(pid, rid, message, spans):
     st = store.chat_state(pid)
     variant = sum(1 for h in hist if h["role"] == "assistant")
     out = {"mode": "chat", "capture": None, "resolved": None, "reword": None, "conflicts": [], "gaps": None,
-           "drafted": None, "nudge": None}
+           "drafted": None, "nudge": None, "cites": [], "parts": None}
     meta = {}
 
     ruled = resolve_by_rule(pid, st, message, names)  # a bare "yes"/"no" to the capture offered last turn
@@ -350,6 +350,8 @@ def turn(pid, rid, message, spans):
 
     out["draft_changed"] = (out["resolved"] or {}).get("outcome") == "accepted" or bool((out["drafted"] or {}).get("drafted"))
     log_chat(pid, "user", message)
+    if out["cites"]:                                      # kept with the reply so a reload can show the same pointers
+        meta["cites"], meta["parts"] = [c["id"] for c in out["cites"]], out["parts"]
     log_chat(pid, "assistant", out["reply"], **meta)
     return out
 
@@ -376,7 +378,7 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
     ctx = {"reviewer_text": " ".join(reviewer_texts + list(phrases.values())), "wants_decline": wants_decline,
            "summary_pref": pref, "summary_requested": bool(chat_checks.SUMMARY_REQ.search(message)),
            "reword_pool": reviewer_texts + [i["text"] for i in synth.items(pid)]}
-    reply, info, j = generate_checked(build_chat_messages(system, hist, message), ctx, phrases)
+    reply, info, j = generate_checked(build_chat_messages(system, hist, message), ctx, phrases, spans)
     chat_checks.record(pid, store, info)
     out["checks"] = {"attempts": info["attempts"], "fallback": info["fallback"]}
     meta["declined"] = wants_decline or bool(chat_checks.DECLINE_MARK.search(reply[:200]))
@@ -385,6 +387,9 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
         return
 
     intent = j.get("intent")
+    shown, parts, found = cites.extract(reply, spans)    # markers out of the text; only real spans of this paper count
+    if intent in ("gap_report", "draft"):
+        found, parts = [], None                          # the app's own list or draft cites nothing: the PDF stays put
     if intent == "gap_report":
         reply, out["gaps"] = gap_reply(pid, spans, variant)
         meta["intent"] = "gap_report"
@@ -392,6 +397,7 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
         reply, out["drafted"] = draft_reply(pid, spans, variant)
         meta["intent"] = "draft"
     else:
+        reply = shown
         if not ruled and offered and j.get("offer_response") in ("accept", "reject"):
             if j["offer_response"] == "accept":
                 sec = section_id(j.get("offer_section"), names) or offered["section"]
@@ -431,6 +437,7 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
             meta["nudge"] = nudge["section"]
             out["nudge"] = {"section": nudge["section"], "label": nudge["label"], "kind": nudge["kind"]}
     out["reply"] = reply
+    out["cites"], out["parts"] = found, cites.reconcile(parts, reply)   # a note appended above stays plain text
 
 
 def looks_like_view(message):
@@ -564,7 +571,18 @@ def call_model(msgs):
     return j, reply, raw, form
 
 
-def generate_checked(msgs, ctx, phrases):
+def checked_errors(reply, ctx, spans=()):
+    """chat_checks.reply_errors on the reply as the reviewer will read it (citation markers turned into plain pointers)
+    AND on the reply with every marker simply removed, so that a marker cannot split a phrase the checks would block."""
+    shown = cites.extract(reply, spans)[0]
+    errs = chat_checks.reply_errors(shown, ctx)
+    bare = cites.plain(reply)
+    if bare != shown:
+        errs += [e for e in chat_checks.reply_errors(bare, ctx) if e not in errs]
+    return errs
+
+
+def generate_checked(msgs, ctx, phrases, spans=()):
     """Every reply passes chat_checks.reply_errors. On failure: regenerate once, then a short neutral fallback.
     An empty or unreadable reply is retried once with a short instruction to answer in the required format.
     Returns (reply, info, parsed json) where info feeds the chat_check log."""
@@ -575,7 +593,7 @@ def generate_checked(msgs, ctx, phrases):
             if form == "empty":
                 errs, retry = ["the reply was empty or not in the required format"], BAD_FORMAT
             else:
-                errs = chat_checks.reply_errors(reply, {**ctx, "reword": j.get("reword")})
+                errs = checked_errors(reply, {**ctx, "reword": j.get("reword")}, spans)
                 retry = chat_checks.correction(errs)
         except Exception as e:  # a down or garbling model is a failed attempt, never a 500
             log.warning("chat model call failed: %r", e)
