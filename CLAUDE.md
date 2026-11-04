@@ -145,7 +145,7 @@ own phrases back; do not map their answers onto a fixed rubric.
 - Python: .\.venv\Scripts\python.exe -m pytest (1149 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
   HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient; tests/conftest.py
   points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
-- Frontend: node --test tests/loops/*.test.mjs tests/chat/*.test.mjs (83 tests: 12 old-flow, 71
+- Frontend: node --test tests/loops/*.test.mjs tests/chat/*.test.mjs (105 tests: 12 old-flow, 93
   chat-first, including a render test that loads the real components through Vite's SSR loader
   and lists every control on screen)
 - Build: npm run build in frontend/

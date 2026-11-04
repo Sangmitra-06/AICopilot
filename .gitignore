@@ -30,3 +30,5 @@ logs
 !.vscode/extensions.json
 .idea
 .DS_Store
+# browser check output (screenshots, backend log)
+scripts/e2e/out/

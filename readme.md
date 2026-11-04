@@ -127,6 +127,30 @@ The frontend talks to `http://127.0.0.1:8000`. That address is hard-coded at the
 | `COPILOT_DB` | `copilot.db` | Path to the SQLite event log. A relative path is relative to the directory the server is started from. |
 | `COPILOT_DATA_DIR` | `data` | Folder where uploaded PDFs are stored (created on first upload). Same relative-path rule. |
 
+## End-to-end browser check
+
+The unit tests cover the logic, not how the screen behaves in a real browser. Scripts in `scripts/e2e/` start a real backend (over a throwaway database) and the built frontend, and drive headless Chrome through the whole journey. They are **not** part of the default test runs: `pytest` only collects `tests/`, and the `node --test` commands only look at `tests/loops` and `tests/chat`. The test commands for every suite are in the "Test commands" section of [CLAUDE.md](CLAUDE.md).
+
+What you need:
+
+- **Chrome** (or Chromium or Edge). It is found in the usual install locations; set `CHROME_PATH` to use another.
+- **The built frontend:** `npm install` and `npm run build` in `frontend/`.
+- **The backend set up as above**, with its Python venv (`backend/.venv` or `.venv`; set `PYTHON` to use another interpreter). The scripts also use it to build a one-page test PDF.
+- **For the full run only, the API key in `backend/.env`** (`OPENROUTER_API_KEY` and `MODEL`). The scripts only check that these have values. They never print the key, and the backend reads the file itself.
+- Ports **8000**, **5173** and **9333** free.
+
+Run from the repository root:
+
+```
+node scripts/e2e/drive.mjs              # the full journey; makes a few real model calls
+node scripts/e2e/drive.mjs --offline    # everything that needs no model (no key needed)
+node scripts/e2e/drive-guided.mjs       # a backend in guided mode shows the old flow (no key needed)
+```
+
+Each check prints `PASS` or `FAIL`, and the script exits 1 if any check fails. If Chrome, the key (full run only), the built frontend or a free port is missing, the script prints `SKIPPED:` with what to fix and exits 0. Screenshots and the backend log go to `scripts/e2e/out/` (git-ignored; set `E2E_OUT` to change it).
+
+The full run checks, among other things: the failure sentence and retry when the backend is down; the onboarding acknowledgements (after a real answer, none after a skip or an off-topic reply); the switch to chat once the paper is attached; that the assistant never claims a capture that did not happen; the draft panel (edit, Copy all); the novice walkthrough and criteria chips; and that `?mode=guided` shows the old flow.
+
 ## Criteria and definitions
 
 The review form is data, not code. `criteria.json` lists the parts, and a venue can swap it without touching the code. Each part has:

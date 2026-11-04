@@ -3,6 +3,7 @@ import ChatView from './ChatView.jsx'
 import { createApi } from './api.js'
 import { createController, browserStorage } from './controller.js'
 import { buildSections, copyText, editEvent } from './draftModel.js'
+import { selectedLabels, toggleLabel } from './chips.js'
 
 const DRAFT_NOTES = {
   noPaper: 'Attach a paper and your draft will appear here.',
@@ -45,19 +46,14 @@ export default function ChatApp() {
     if (inputRef.current) inputRef.current.focus()
   }, [controller, text])
 
-  const selected = useMemo(() => {
-    const labels = new Set(text.split(',').map(s => s.trim()).filter(Boolean))
-    return new Set((state.menu || []).filter(o => labels.has(o.label)).map(o => o.label))
-  }, [text, state.menu])
+  const selected = useMemo(() => selectedLabels(text, state.menu), [text, state.menu])
 
   // A chip toggles its label in the text box (so several can be picked); "Other, in my words" just opens the box.
+  // The update is functional, so two quick clicks never overwrite each other.
   const onChip = useCallback(option => {
-    if (option.id === 'other') { if (inputRef.current) inputRef.current.focus(); return }
-    const parts = text.split(',').map(s => s.trim()).filter(Boolean)
-    const next = parts.includes(option.label) ? parts.filter(p => p !== option.label) : [...parts, option.label]
-    setText(next.join(', '))
+    if (option.id !== 'other') setText(prev => toggleLabel(prev, option.label))
     if (inputRef.current) inputRef.current.focus()
-  }, [text])
+  }, [])
 
   const onEditItem = useCallback(async (item, value) => {
     const ev = editEvent(item, value)
