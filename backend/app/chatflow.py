@@ -35,6 +35,21 @@ GAP_REQ = re.compile(
 DRAFT_REQ = re.compile(
     r"\b(?:draft (?:it|this|that|my review|the review)|write (?:it|the review|my review) up|put (?:it|this) all "
     r"together|assemble (?:it|the review|my review)|generate (?:my |the )?(?:review|draft))\b", re.I)
+GAP_REQ2 = re.compile(
+    r"\bwhat else (?:should|do|can|could|must|would) i (?:\w+ ){0,3}(?:add|write|cover|fill|address|include)\b|"
+    r"\bwhat (?:do|should) i (?:still |also )?(?:need to |have to )?(?:add|write|cover|fill|address)\b|"
+    r"\bwhat (?:remains|is remaining|else is (?:left|open|empty))\b|"
+    r"\bwhat" + APOS + r"s (?:still )?(?:remaining|outstanding|unfinished|empty|blank|not covered)\b|"
+    r"\bwhich (?:sections?|parts?) (?:are |is )?(?:still )?(?:empty|open|left|missing|blank|unfilled|not covered)\b|"
+    r"\banything (?:else )?(?:i )?(?:need|have|should|must)(?: to)? (?:add|fill|cover|write|address|do)\b", re.I)
+DRAFT_REQ2 = re.compile(
+    r"^\W*(?:(?:ok(?:ay)?|please|now|so|can you|could you|would you|will you|go ahead and)\W*\s*)*"
+    r"(?:draft|assemble|compile)\b|"
+    r"\b(?:show|give|let me see|can i see|see)\s+(?:me\s+)?(?:the|my)\s+(?:draft|full review)\b|"
+    r"\bput (?:my|the) review together\b", re.I)
+GAP_PROMISE = re.compile(r"\b(?:list of (?:the )?sections|sections still open|still open in your draft|"
+                         r"what(?:'|’)s (?:still )?(?:open|missing) in your (?:draft|review))\b", re.I)
+DRAFT_PROMISE = re.compile(r"\b(?:here(?:'|’)s your draft|assembled from the notes|here is your draft)\b", re.I)
 OFFER_WORDS = re.compile(r"\b(?:add|put|capture|save|include|note|place|file|record|keep)\b", re.I)
 OFFER_WHERE = re.compile(r"\b(?:draft|review|section|under|to your|in your)\b", re.I)
 FACT_CUE = re.compile(r"\d|\b(?:paper|authors?|they|their|section|table|figure|dataset|baseline|model|report\w*|"
@@ -149,7 +164,7 @@ def draft_reply(pid, spans, variant=0):
     except Exception as e:
         log.warning("sorting notes before drafting failed: %r", e)
     its = sorted(synth.items(pid), key=lambda i: i["order"])
-    drafted, empty = [], []
+    drafted, empty, blocks = [], [], []
     for fid, label in names.items():
         sel = [i for i in its if i["field"] == fid]
         if not sel:
@@ -159,16 +174,20 @@ def draft_reply(pid, spans, variant=0):
         store.log(pid, "draft_generated", {"field": fid, "mode": "smooth", "fallback": res["fallback"],
                                            "sentences": res["sentences"]})
         drafted.append(label)
+        blocks.append(label + "\n" + " ".join(s["text"] for s in res["sentences"]))   # the text the panel shows
     unplaced = [i for i in its if not i["field"]]
-    if not drafted:
+    if unplaced:                                         # their notes, as written, so nothing the reviewer said is hidden
+        blocks.append("Not placed in a section yet\n" + "\n".join(f"- {i['text']}" for i in unplaced))
+    if not drafted and not unplaced:
         return ("There's nothing in your review yet to draft from. Tell me what you think about the paper and "
-                "I'll add it to your draft as we go."), {"drafted": [], "empty": empty}
+                "I'll add it to your draft as we go. Sections still open: " + ", ".join(empty) + "."
+                ), {"drafted": [], "empty": empty}
     lead = ["Drafted: ", "I've drafted: ", "The draft now has: "][variant % 3]
-    text = lead + ", ".join(drafted) + ". Open the review draft to read, edit or copy it."
+    head = (lead + ", ".join(drafted) + ". Open the review draft to read, edit or copy it.") if drafted else \
+        "Nothing is placed in a section yet, so these are your notes as you wrote them."
+    text = head + "\n\n" + "\n\n".join(blocks)
     if empty:
-        text += " Nothing to draft yet for " + ", ".join(empty) + ", so I left those empty."
-    if unplaced:
-        text += f" {len(unplaced)} of your notes aren't in a section yet, so they aren't in the draft."
+        text += "\n\nNothing to draft yet for " + ", ".join(empty) + ", so I left those empty."
     return text, {"drafted": drafted, "empty": empty}
 
 
@@ -347,12 +366,12 @@ def turn(pid, rid, message, spans):
             store.log(pid, "section_promised", {"section": sid})
     st = dict(store.chat_state(pid), last_assistant=previous)
 
-    if GAP_REQ.search(message):
+    if GAP_REQ.search(message) or GAP_REQ2.search(message):
         out["reply"], out["gaps"] = gap_reply(pid, spans, variant)
         out["reply"] = add_line(pid, out, names, out["reply"])
         out["checks"] = {"attempts": 0, "fallback": False}
         meta["intent"] = "gap_report"
-    elif DRAFT_REQ.search(message):
+    elif DRAFT_REQ.search(message) or DRAFT_REQ2.search(message):
         out["reply"], out["drafted"] = draft_reply(pid, spans, variant)
         out["reply"] = add_line(pid, out, names, out["reply"])
         out["checks"] = {"attempts": 0, "fallback": False}
@@ -400,6 +419,8 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
         return
 
     intent = j.get("intent")
+    if intent not in ("gap_report", "draft"):         # a reply that promises a list or a draft is replaced by the real one
+        intent = "gap_report" if GAP_PROMISE.search(reply) else "draft" if DRAFT_PROMISE.search(reply) else intent
     shown, parts, found = cites.extract(reply, spans)    # markers out of the text; only real spans of this paper count
     if intent in ("gap_report", "draft"):
         found, parts = [], None                          # the app's own list or draft cites nothing: the PDF stays put
@@ -469,7 +490,7 @@ def looks_like_view(message):
     m = message.strip()
     if len(m.split()) < 4 or chat_checks.QUESTION_LIKE.search(m) or chat_checks.asks_for_judgment(m):
         return False
-    if GAP_REQ.search(m) or DRAFT_REQ.search(m) or nudges.natural_pause(m):
+    if GAP_REQ.search(m) or GAP_REQ2.search(m) or DRAFT_REQ.search(m) or DRAFT_REQ2.search(m) or nudges.natural_pause(m):
         return False
     return not re.match(r"(?i)^\s*(?:please\s+)?(?:reword|rephrase|rewrite|tighten|soften|polish|make this)\b", m)
 

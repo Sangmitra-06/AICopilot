@@ -148,3 +148,42 @@ def test_every_added_claim_in_a_whole_session_matches_a_note(env):
         if t.get("role") == "assistant":
             assert_added_claims_are_true(t["text"])
     assert sorted(n["field"] for n in live_notes()) == ["strengths", "summary"]
+
+
+# ------------------------------------------------------------------ the real session, replayed against a scripted model
+
+def test_replay_of_the_real_session_the_notes_the_panel_and_the_reply_always_agree(env, monkeypatch):
+    from test_chat_capabilities import fake_drafter
+    c, set_model = env
+    fake_drafter(monkeypatch)
+    low = "Five participants per region seems low"
+    script = [
+        (MESSAGE, {"reply": "Got it. Want me to add your sentence to Paper summary as written?",
+                   "views": [{"text": SENTENCE, "section": "summary"}]}),
+        ("Yes lets add it as my sentence", "Added to Paper summary, in your own words."),     # prose, claims it itself
+        (low, {"reply": "Noted. Want me to add that to Summary of weaknesses?", "views": [{"text": low, "section": "weaknesses"}]}),
+        ("no i mean add the strengths", {"reply": "Added to Paper summary.", "offer_response": "accept"}),
+        ("what else do I have to add?", "Here's the list of sections still open in your draft."),
+        ("draft it", "Here's your draft, assembled from the notes you've added so far."),
+    ]
+    set_model(*[r for _, r in script])
+    replies = []
+    for message, _ in script:
+        body = post(c, message)
+        replies.append(body["reply"])
+        assert_added_claims_are_true(body["reply"])
+        panel_notes = [n for n in c.get("/notes/p1").json() if not n["removed"]]      # what the draft panel lists
+        said = [m.group(0) for m in ADDED.finditer(body["reply"])]
+        if body.get("added"):
+            assert any(n["id"] == body["added"]["note_id"] and n["field"] == body["added"]["section"] for n in panel_notes)
+        elif not body["draft_changed"]:
+            assert not said
+    assert [(n["text"], n["field"]) for n in c.get("/notes/p1").json() if not n["removed"]] == [
+        (SENTENCE, "summary"), (low, "strengths")]
+    assert sum("Added to" in r for r in replies) == 2                                    # exactly the two real captures
+    assert replies[0].count("Want me to add") == 1
+    gap, draft = replies[4], replies[5]
+    required = next(l for l in gap.splitlines() if l.startswith("- Required"))
+    assert "Paper summary" not in required and "Summary of strengths" not in required and "Soundness" in required
+    assert SENTENCE in draft and low in draft
+    assert [s["text"] for s in c.get("/draft/p1").json()["summary"]["sentences"]] == [SENTENCE]
