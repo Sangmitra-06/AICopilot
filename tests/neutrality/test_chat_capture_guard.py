@@ -8,6 +8,7 @@ from app import capture, chat_checks as cc, store, synth
 from conftest import make_reviewer
 from test_nudges import SECTIONS
 
+n2 = chr(10) * 2
 VIEW = "five participants per region seems low"
 MESSAGE = f"I think {VIEW}"
 
@@ -184,14 +185,14 @@ def test_an_unbacked_offer_in_prose_is_removed_so_a_later_yes_is_not_a_dead_end(
     assert body["reply"] == "Noted." and store.chat_state("p1")["views"] == {}
 
 
-def test_a_real_offer_stays_and_the_yes_then_makes_the_claim_true(env):
+def test_a_real_offer_is_the_apps_and_the_yes_then_makes_the_claim_true(env):
     c, set_model = env
     offer = "Noted. Want me to add that to the Weaknesses section of your draft?"
     set_model({"reply": offer, "views": [{"text": VIEW, "section": "weaknesses"}]},
               {"reply": "Added to Weaknesses."})
     assert post(c, MESSAGE)["reply"] == "Noted." + chr(10)*2 + "Want me to add that to Summary of weaknesses?"   # the app's wording, once
     body = post(c, "yes")
-    assert body["reply"] == "Added to Weaknesses."                     # the capture was written this turn
+    assert body["reply"] == "Added to Summary of weaknesses, in your own words."   # the app's line: the note exists now
     assert [n["text"] for n in notes()] == [VIEW]
 
 
@@ -204,13 +205,14 @@ def test_a_no_does_not_make_an_added_claim_true(env):
     assert "Added" not in body["reply"] and notes() == []
 
 
-def test_a_model_driven_accept_keeps_the_claim(env):
+def test_a_model_driven_accept_gets_the_apps_claim(env):
     c, set_model = env
     set_model({"reply": "Noted. Want me to add that to the Weaknesses section?", "views": [{"text": VIEW, "section": "weaknesses"}]},
               {"reply": "Done. Added to Strengths.", "offer_response": "accept", "offer_section": "strengths"})
     post(c, MESSAGE)
     body = post(c, "yes, but put it under strengths")
-    assert body["reply"] == "Done. Added to Strengths." and notes()[0]["field"] == "strengths"
+    assert body["reply"] == "Done." + n2 + "Added to Summary of strengths, in your own words."   # the app's line, not the model's
+    assert notes()[0]["field"] == "strengths"
 
 
 def test_sentences_about_the_paper_are_never_taken_for_claims(env):
@@ -261,7 +263,7 @@ def test_a_yes_then_writes_it_exactly_as_for_a_json_reply(env):
     [n] = notes()
     assert (n["text"], n["field"]) == (VIEW, "weaknesses")
     assert body["resolved"] == {"outcome": "accepted", "text": VIEW} and body["draft_changed"] is True
-    assert body["reply"] == "Added to Summary of weaknesses."                    # true now: it was recorded this turn
+    assert body["reply"] == "Added to Summary of weaknesses, in your own words."   # the app's line, true now
     assert store.chat_state("p1")["views"]["v1"]["outcome"] == "accepted"
     assert any(i["text"] == VIEW for i in synth.items("p1"))
 

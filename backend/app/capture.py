@@ -66,14 +66,19 @@ ABOUT_THE_PAPER = re.compile(r"\b(?:authors?|paper|they|their|study)\b", re.I)
 SPEAKER = re.compile(r"\b(?:i|i(?:'|’)(?:ve|ll|m)|you|your|you(?:'|’)ve)\b", re.I)
 
 
-def classify(sentence, claim, offer):
+def classify(sentence, claim, offer, names=()):
     """'claim', 'offer' or None for one sentence. A claim is the assistant saying something was added to the draft:
-    not a negation ("I haven't added anything"), and not a sentence about the paper ("The authors added ...")."""
+    not a negation ("I haven't added anything"), and not a sentence about the paper ("The authors added ...").
+    `names` are the review form's section names: "Paper summary" is a place in the draft, so the word "paper" inside
+    it does not make "Added to Paper summary." a sentence about the paper."""
     s = sentence.strip()
     if not s:
         return None
     asked = s.endswith("?") or bool(OFFER_FRAME.search(s))
-    about_paper = bool(ABOUT_THE_PAPER.search(s)) and not SPEAKER.search(s)
+    bare = s
+    for n in sorted(names, key=len, reverse=True):
+        bare = re.sub(re.escape(n), " ", bare, flags=re.I)
+    about_paper = bool(ABOUT_THE_PAPER.search(bare)) and not SPEAKER.search(s)
     if not asked and not NEGATED.search(s) and not about_paper and any(p.search(s) for p in claim):
         return "claim"
     if asked and offer.search(s):
@@ -92,13 +97,18 @@ def scrub(reply, sections, claims_ok=False, offers_ok=False, empty_line=OK):
     kept, removed = [], []
     for i in range(0, len(parts), 2):
         sent, sep = parts[i], parts[i + 1] if i + 1 < len(parts) else ""
-        kind = classify(sent, claim, offer)
+        kind = classify(sent, claim, offer, [s["name"] for s in sections])
         if (kind == "claim" and not claims_ok) or (kind == "offer" and not offers_ok):
             removed.append(sent.strip())
             continue
         kept.append(sent + sep)
     text = "".join(kept).strip()
     return (text or empty_line if removed else text), removed
+
+
+def added_line(label):
+    """The app's own confirmation that a note was written ("" = not placed in a section). The model never writes it."""
+    return f"Added to {label or 'your draft'}, in your own words."
 
 
 def offer_line(label, text=None):

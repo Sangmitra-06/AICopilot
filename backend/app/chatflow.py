@@ -332,12 +332,13 @@ def turn(pid, rid, message, spans):
     st = store.chat_state(pid)
     variant = sum(1 for h in hist if h["role"] == "assistant")
     out = {"mode": "chat", "capture": None, "resolved": None, "reword": None, "conflicts": [], "gaps": None,
-           "drafted": None, "nudge": None, "cites": [], "parts": None}
+           "drafted": None, "nudge": None, "cites": [], "parts": None, "added": None}
     meta = {}
 
     ruled = resolve_by_rule(pid, st, message, names)  # a bare "yes"/"no" to the capture offered last turn
     if ruled:
         out["resolved"] = {"outcome": ruled[0], "text": ruled[2]["text"]}
+        out["_vid"] = ruled[1]
     sections = [{"id": c["id"], "name": c["name"]} for c in criteria.items()]
     previous = st["last_assistant"]                      # the turn before this message, for the nudge rules
     resolve_nudge(pid, st, message, sections)            # what became of the nudge offered last turn
@@ -348,15 +349,18 @@ def turn(pid, rid, message, spans):
 
     if GAP_REQ.search(message):
         out["reply"], out["gaps"] = gap_reply(pid, spans, variant)
+        out["reply"] = add_line(pid, out, names, out["reply"])
         out["checks"] = {"attempts": 0, "fallback": False}
         meta["intent"] = "gap_report"
     elif DRAFT_REQ.search(message):
         out["reply"], out["drafted"] = draft_reply(pid, spans, variant)
+        out["reply"] = add_line(pid, out, names, out["reply"])
         out["checks"] = {"attempts": 0, "fallback": False}
         meta["intent"] = "draft"
     else:
         model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled, variant, out, meta)
 
+    out.pop("_vid", None)
     out["draft_changed"] = (out["resolved"] or {}).get("outcome") == "accepted" or bool((out["drafted"] or {}).get("drafted"))
     log_chat(pid, "user", message)
     if out["cites"]:                                      # kept with the reply so a reload can show the same pointers
@@ -392,7 +396,7 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
     out["checks"] = {"attempts": info["attempts"], "fallback": info["fallback"]}
     meta["declined"] = wants_decline or bool(chat_checks.DECLINE_MARK.search(reply[:200]))
     if info["fallback"]:
-        out["reply"] = reply
+        out["reply"] = add_line(pid, out, names, reply)   # a confirmation the app already wrote is still told truthfully
         return
 
     intent = j.get("intent")
@@ -411,6 +415,7 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
             if j["offer_response"] == "accept":
                 sec = section_id(j.get("offer_section"), names) or offered["section"]
                 accept_capture(pid, vid, offered, sec)
+                out["_vid"] = vid
                 out["resolved"] = {"outcome": "accepted", "text": offered["text"]}
             else:
                 reject_capture(pid, vid)
@@ -444,6 +449,7 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
             store.log(pid, "nudge_offered", {"section": nudge["section"], "kind": nudge["kind"]})
             meta["nudge"] = nudge["section"]
             out["nudge"] = {"section": nudge["section"], "label": nudge["label"], "kind": nudge["kind"]}
+    reply = add_line(pid, out, names, reply)
     out["reply"] = reply
     out["cites"], out["parts"] = found, cites.reconcile(parts, reply)   # a note appended above stays plain text
 
@@ -504,6 +510,20 @@ def offer_views(pid, views, names):
             "several": len(made) > 1}
 
 
+def add_line(pid, out, names, reply):
+    """The app's own "Added to X, in your own words." line, appended only when a capture was accepted this turn AND its
+    note is in the store (not removed), under the section it names. The model never writes this sentence."""
+    vid = out.pop("_vid", None)
+    if not vid or (out["resolved"] or {}).get("outcome") != "accepted":
+        return reply
+    n = next((n for n in store.notes(pid) if n.get("view") == vid and not n["removed"]), None)
+    if not n:
+        return reply
+    label = names.get(n["field"], "") if n.get("field") else ""
+    out["added"] = {"note_id": n["id"], "section": n.get("field") or "", "label": label or "your draft"}
+    return (reply + "\n\n" + capture.added_line(label)).strip()
+
+
 def keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_decline, several=False):
     """The reply may say something was added to the draft only if the backend recorded it this turn.
     - If the reply carried no structured fields and the message states a view, extract it and OFFER it in the app's
@@ -524,8 +544,10 @@ def keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_
     sections = [{"id": i, "name": n} for i, n in names.items()]
     asked = bool(chat.YES.match(message.strip()) or re.search(r"(?i)\b(?:add|save|capture|keep|record)\b", message))
     recorded = bool(out["capture"])                      # an offer the app recorded this turn
-    reply, removed = capture.scrub(reply, sections, claims_ok=accepted_now, offers_ok=False, empty_line="")
-    if removed and not reply and not recorded:
+    # Every model-written claim of a capture goes, even when a note was written this turn: the app says it itself
+    # (add_line), after checking that the note exists.
+    reply, removed = capture.scrub(reply, sections, claims_ok=False, offers_ok=False, empty_line="")
+    if removed and not reply and not recorded and not accepted_now:
         reply = capture.NOT_ADDED if asked else capture.OK
     if recorded:
         cap = out["capture"]
