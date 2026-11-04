@@ -411,24 +411,23 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
         new = valid_views(j, message, store.chat_state(pid)["views"], names)
         have = [{"text": i["text"]} for i in synth.items(pid)]
         new = [v for v in new if not coverage.in_draft(v["text"], have)]   # already in their draft: nothing to offer
-        made = None
+        made, several = None, False
         for v in new:
             n = len(store.chat_state(pid)["views"]) + 1
             v_id = f"v{n}"
             store.log(pid, "view_stated", {"vid": v_id, "text": v["text"], "section": v["section"]})
-            if made is None and OFFER_WORDS.search(reply) and OFFER_WHERE.search(reply):
+            if made is None and offers_in(reply, names):
                 made = (v_id, v)
         if made:
             store.log(pid, "capture_offered", {"vid": made[0]})
             meta["offer"] = made[0]
             out["capture"] = {"id": made[0], "text": made[1]["text"], "section": made[1]["section"],
                               "label": names.get(made[1]["section"], "")}
-            out["conflicts"] = conflict_notes(made[1]["text"], spans)
-            if out["conflicts"]:
-                reply += "\n\n" + "\n".join(c["text"] for c in out["conflicts"])
+            out["conflicts"] = conflict_notes(made[1]["text"], spans)   # appended after the offer, in keep_captures_honest
+            several = len(new) > 1
         # Keep captures honest, and offer a view found in a prose reply. This runs before the nudge check so that a turn
         # carrying an offer is never also counted as a nudge.
-        reply = keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_decline)
+        reply = keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_decline, several)
         # A nudge counts as used when a directive was given this turn and the reply addresses that section. The model's
         # own nudge_used flag is optional (a prose reply has none); only an explicit false (it skipped the nudge) is
         # respected.
@@ -438,6 +437,15 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
             out["nudge"] = {"section": nudge["section"], "label": nudge["label"], "kind": nudge["kind"]}
     out["reply"] = reply
     out["cites"], out["parts"] = found, cites.reconcile(parts, reply)   # a note appended above stays plain text
+
+
+def offers_in(reply, names):
+    """Did the model's reply offer to put something in the draft? (Its wording only tells us that it did: the offer
+    the reviewer reads is the app's own line, see keep_captures_honest.)"""
+    if OFFER_WORDS.search(reply) and OFFER_WHERE.search(reply):
+        return True
+    _, removed = capture.scrub(reply, [{"id": i, "name": n} for i, n in names.items()], claims_ok=True, offers_ok=False)
+    return bool(removed)
 
 
 def looks_like_view(message):
@@ -487,25 +495,32 @@ def offer_views(pid, views, names):
             "several": len(made) > 1}
 
 
-def keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_decline):
+def keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_decline, several=False):
     """The reply may say something was added to the draft only if the backend recorded it this turn.
     - If the reply carried no structured fields and the message states a view, extract it and OFFER it in the app's
       own wording; nothing is written until the reviewer says yes.
-    - Claims that something was added / saved / noted, and offers to do so that no offer stands behind, are removed."""
+    - Claims that something was added / saved / noted, and offers to do so that no offer stands behind, are removed.
+    - When the app records an offer (from the model's views or from the extraction call), every offer sentence the
+      model wrote is removed and the app's own line is the only offer in the reply."""
     accepted_now = (out["resolved"] or {}).get("outcome") == "accepted"
     structured = bool(j.get("views") or j.get("reword") or j.get("offer_response") or out["capture"] or out["resolved"])
     offer = None
     if not structured and not wants_decline and looks_like_view(message):
         offer = offer_views(pid, extract_views(pid, message, names), names)
-    sections = [{"id": i, "name": n} for i, n in names.items()]
-    asked = bool(chat.YES.match(message.strip()) or re.search(r"(?i)\b(?:add|save|capture|keep|record)\b", message))
-    reply, _ = capture.scrub(reply, sections, claims_ok=accepted_now, offers_ok=bool(out["capture"]),
-                             empty_line=capture.NOT_ADDED if asked else capture.OK)
     if offer:
         meta["offer"] = offer["id"]
         out["capture"] = {k: offer[k] for k in ("id", "text", "section", "label")}
-        reply = (reply + "\n\n" + capture.offer_line(offer["label"], offer["text"] if offer["several"] else None)).strip()
+        several = offer["several"]
         out["conflicts"] = conflict_notes(offer["text"], spans)
+    sections = [{"id": i, "name": n} for i, n in names.items()]
+    asked = bool(chat.YES.match(message.strip()) or re.search(r"(?i)\b(?:add|save|capture|keep|record)\b", message))
+    recorded = bool(out["capture"])                      # an offer the app recorded this turn
+    reply, removed = capture.scrub(reply, sections, claims_ok=accepted_now, offers_ok=False, empty_line="")
+    if removed and not reply and not recorded:
+        reply = capture.NOT_ADDED if asked else capture.OK
+    if recorded:
+        cap = out["capture"]
+        reply = (reply + "\n\n" + capture.offer_line(cap["label"], cap["text"] if several else None)).strip()
         if out["conflicts"]:
             reply += "\n\n" + "\n".join(c["text"] for c in out["conflicts"])
     return reply

@@ -172,7 +172,7 @@ def test_a_reload_gets_the_same_pointers_from_the_thread(env):
 def test_a_note_appended_to_a_reply_does_not_break_the_pointers(env, monkeypatch):
     c, set_model = env
     monkeypatch.setattr(chatflow, "conflict_notes", lambda text, spans: [{"text": "Note: the paper says otherwise."}])
-    set_model({"reply": "Noted; I can add that to your weaknesses [s4].", "views": [
+    set_model({"reply": "Table 2 reports the accuracy [s4]. Noted; I can add that to your weaknesses.", "views": [
         {"text": "The accuracy is lower than I expected", "section": "weaknesses"}]})
     body = chat(c, "The accuracy is lower than I expected")
     if body["capture"]:                                                                  # the offer path appended the note

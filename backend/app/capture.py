@@ -20,7 +20,8 @@ OK = "Understood."
 DONE = r"(?:added|saved|captured|recorded|logged|filed|stored|put|placed|noted|written|included|kept)"
 BASE = r"(?:add|save|capture|record|put|note|log|file|keep|include|store)"
 PREP = r"(?:to|in|into|under|on)"
-THAT = r"(?:that|it|this|those|your (?:point|note|comment|view|concern|words?|observation))"
+THAT = (r"(?:that|it|this|those|these|(?:your|the|my|their) (?:[a-z]+ ){0,2}"
+        r"(?:point|note|comment|view|concern|words?|observation|sentence|sentences|text|statement|line|wording|remark))")
 # Saying that something is only an option, not a fact.
 OFFER_FRAME = re.compile(
     r"\b(?:want me to|would you like me to|do you want me to|should i|shall i|can i|may i|i can|i could|"

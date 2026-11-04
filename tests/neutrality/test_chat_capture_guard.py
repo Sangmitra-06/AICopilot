@@ -189,7 +189,7 @@ def test_a_real_offer_stays_and_the_yes_then_makes_the_claim_true(env):
     offer = "Noted. Want me to add that to the Weaknesses section of your draft?"
     set_model({"reply": offer, "views": [{"text": VIEW, "section": "weaknesses"}]},
               {"reply": "Added to Weaknesses."})
-    assert post(c, MESSAGE)["reply"] == offer                          # backed by a registered offer
+    assert post(c, MESSAGE)["reply"] == "Noted." + chr(10)*2 + "Want me to add that to Summary of weaknesses?"   # the app's wording, once
     body = post(c, "yes")
     assert body["reply"] == "Added to Weaknesses."                     # the capture was written this turn
     assert [n["text"] for n in notes()] == [VIEW]
