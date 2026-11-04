@@ -65,3 +65,77 @@ def model_says(monkeypatch):
         monkeypatch.setattr(llm, "_chat", fake)
         return calls
     return install
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Chat-first helpers: a throwaway database, a paper, reviewers with a finished profile, a scripted model.
+
+PAPER = [
+    {"id": "s1", "text": "We study probing of syntax in pretrained encoders and report accuracy on three datasets.",
+     "page": 1, "lines": [1, 3], "section": "Abstract", "kind": "body", "segs": [(90, 1)]},
+    {"id": "s2", "text": "Our contributions are a new probing dataset and a layer-wise analysis.",
+     "page": 1, "lines": [10, 11], "section": "1 Introduction", "kind": "body", "segs": [(70, 10)]},
+    {"id": "s3", "text": "We train with weak supervision from automatically parsed sentences.",
+     "page": 2, "lines": [30, 31], "section": "3 Method", "kind": "body", "segs": [(70, 30)]},
+    {"id": "s4", "text": "Table 2 reports accuracy of 71.2 on SST-2 and 64.0 on CoLA.",
+     "page": 4, "lines": [80, 81], "section": "4 Experiments", "kind": "body", "segs": [(60, 80)]},
+    {"id": "s5", "text": "Smith et al. 2019. A thing.", "page": 9, "lines": [200, 200], "section": "References",
+     "kind": "body", "segs": [(30, 200)]},
+]
+
+
+def make_reviewer(rid, closed=True, **said):
+    """Log a finished onboarding for `rid`. `said` maps profile fields to the reviewer's own words; anything
+    not given is a default, as if they had skipped it."""
+    import time
+    from app import onboarding as ob, store
+    key = store.reviewer_key(rid)
+    for f in ob.FIELDS:
+        val = said.get(f)
+        if val is not None:
+            store.log(key, "profile_field_set", {"field": f, "value": said.get(f + "__value", val),
+                                                 "source": "answer", "raw": val})
+        else:
+            store.log(key, "profile_field_set", {"field": f, "value": ob.DEFAULTS[f], "source": "default", "raw": ""})
+    if closed:
+        store.log(key, "onboarding_closed", {"reason": "complete", "defaulted": []})
+
+
+class Model:
+    """A scripted model. Each call returns the next scripted reply (a dict, or a raw string); the last one
+    repeats. `calls` keeps every message list it was sent."""
+
+    def __init__(self, *replies):
+        self.replies, self.calls = list(replies) or [{"reply": "Okay."}], []
+
+    def __call__(self, msgs):
+        self.calls.append(msgs)
+        r = self.replies[min(len(self.calls) - 1, len(self.replies) - 1)]
+        return r if isinstance(r, str) else json.dumps(r)
+
+    @property
+    def system(self):
+        return self.calls[-1][0]["content"]
+
+
+@pytest.fixture
+def chat_env(tmp_path, monkeypatch):
+    """(client, set_model) over the real app, with a temporary database and an in-memory paper 'p1'."""
+    import sqlite3
+    from fastapi.testclient import TestClient
+    from app import main, store, chatflow
+    db = sqlite3.connect(tmp_path / "events.db", check_same_thread=False)
+    db.execute("create table events(id integer primary key, ts real, paper text, type text, payload text)")
+    db.commit()
+    monkeypatch.setattr(store, "db", db)
+    monkeypatch.setitem(main.CACHE, "p1", PAPER)
+    holder = {}
+
+    def set_model(*replies):
+        holder["m"] = Model(*replies)
+        monkeypatch.setattr(chatflow, "_chat", holder["m"])
+        return holder["m"]
+    set_model()
+    with TestClient(main.app) as c:
+        yield c, set_model
+    db.close()

@@ -5,10 +5,10 @@ import pymupdf
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import re
 from contextlib import asynccontextmanager
-from . import ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper, onboarding, venue
+from . import ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper, onboarding, venue, chatflow
 from . import brief as brief_mod
 from . import guide as guide_mod
 
@@ -459,6 +459,23 @@ def profile_ep(rid: str):
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", rid):
         raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
     return onboarding.profile_view(store.onboarding(rid))
+
+
+class ChatReq(BaseModel): reviewer_id: str; message: str = Field(min_length=1, max_length=20000)
+
+
+def have_paper(pid):
+    return pid in CACHE or os.path.exists(f"{DATA_DIR}/{pid}.pdf")
+
+
+@app.post("/chat/{pid}")
+def chat_ep(pid: str, r: ChatReq):
+    """Chat-first: one message in, one free-form reply out (onboarding first, then conversation)."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", r.reviewer_id):
+        raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
+    if not have_paper(pid):
+        raise HTTPException(404, "unknown paper")
+    return chatflow.turn(pid, r.reviewer_id, r.message, spans_of(pid))
 
 
 class Hl(BaseModel): paper_id: str
