@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import pymupdf
 from fastapi import FastAPI, UploadFile, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import re
@@ -413,11 +413,21 @@ class OnbAnswer(BaseModel): text: str
 
 
 def run_onboarding(rid, text=None):
-    """Log the reply (if any), then return the next onboarding step. All rules live in onboarding.py."""
+    """Log the reply (if any), then return (next step, conflict). All rules live in onboarding.py.
+
+    conflict is True when a reply arrives while no question is pending and onboarding is still open, which
+    means the client never fetched the first question. Nothing is logged then: the step returned is the
+    question a GET would return, so the reply is refused loudly instead of being silently dropped."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", rid):
         raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
     key = store.reviewer_key(rid)
     st = store.onboarding(rid)
+    if text is not None and st["pending"] is None and not st["closed"]:
+        _, step = onboarding.next_step(st, rid)  # the events are discarded: a 409 changes nothing
+        step["profile"] = onboarding.profile_view(st)
+        step["error"] = "no_question_pending"
+        step["message"] = "No question has been fetched yet. GET /onboarding/{rid} first, then answer the question it returns."
+        return step, True
     if text is not None:
         for e in onboarding.process(st, text, onboarding.model_on_topic):
             store.log(key, e["type"], e["payload"])
@@ -426,19 +436,22 @@ def run_onboarding(rid, text=None):
     for e in evs:
         store.log(key, e["type"], e["payload"])
     step["profile"] = onboarding.profile_view(store.onboarding(rid))
-    return step
+    return step, False
 
 
 @app.get("/onboarding/{rid}")
 def onboarding_step(rid: str):
     """The current onboarding question (repeated, not advanced, if already pending), or done."""
-    return run_onboarding(rid)
+    return run_onboarding(rid)[0]
 
 
 @app.post("/onboarding/{rid}/answer")
 def onboarding_answer(rid: str, r: OnbAnswer):
-    """Record the reply to the pending question and return the next step."""
-    return run_onboarding(rid, r.text)
+    """Record the reply to the pending question and return the next step.
+
+    409, with the current question in the body, if no question had been fetched yet."""
+    step, conflict = run_onboarding(rid, r.text)
+    return JSONResponse(step, status_code=409) if conflict else step
 
 
 @app.get("/profile/{rid}")

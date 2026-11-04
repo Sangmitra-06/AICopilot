@@ -104,11 +104,70 @@ def test_bad_bodies_are_a_4xx_not_a_500_and_log_nothing(client, kwargs):
     assert rows() == n
 
 
-def test_an_answer_before_any_question_is_not_recorded_and_does_not_fail(client):
+# ------------------------------------------------------------------ an answer before the first question
+
+def test_an_answer_before_the_first_question_is_a_409_carrying_the_current_question(client):
     r = answer(client, "fresh", "7 papers")
-    assert r.status_code == 200
-    assert r.json()["field"] == "papers_reviewed" and r.json()["turn"] == 0  # asked, not answered
-    assert answer(client, "fresh", "7 papers").json()["field"] == "subarea_familiarity"
+    assert r.status_code == 409
+    body = r.json()
+    assert body["error"] == "no_question_pending" and "fetch" in body["message"].lower()
+    assert body["done"] is False and body["field"] == "papers_reviewed" and body["kind"] == "question"
+    assert "how many papers" in body["question"].lower() and body["turn"] == 0
+
+
+def test_the_409_changes_nothing_and_the_answer_is_not_recorded(client):
+    for _ in range(3):
+        assert answer(client, "fresh", "7 papers").status_code == 409
+    assert rows() == 0  # no question was logged, no answer was logged
+    p = client.get("/profile/fresh").json()
+    assert p["evidence"]["papers_reviewed"] is None and p["turn"] == 0
+
+
+def test_the_question_in_the_409_is_the_one_a_get_then_returns(client):
+    conflict = answer(client, "fresh", "7 papers").json()
+    fetched = client.get("/onboarding/fresh")
+    assert fetched.status_code == 200
+    got = fetched.json()
+    for k in ("done", "field", "kind", "question", "turn", "max_turns"):
+        assert got[k] == conflict[k]
+
+
+def test_after_the_409_a_fetch_then_an_answer_works_normally(client):
+    assert answer(client, "fresh", "7 papers").status_code == 409
+    client.get("/onboarding/fresh")
+    r = answer(client, "fresh", "7 papers")
+    assert r.status_code == 200 and r.json()["field"] == "subarea_familiarity"
+    assert r.json()["profile"]["evidence"]["papers_reviewed"]["value"] == 7
+
+
+def test_a_409_carries_cors_headers_for_the_frontend(client):
+    r = client.post("/onboarding/fresh/answer", json={"text": "3"}, headers={"Origin": "http://localhost:5173"})
+    assert r.status_code == 409 and r.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_a_malformed_body_is_still_a_422_before_any_question(client):
+    assert client.post("/onboarding/fresh/answer", json={}).status_code == 422
+    assert client.post("/onboarding/fresh/answer", content="{no", headers={"content-type": "application/json"}).status_code == 422
+    assert rows() == 0
+
+
+def test_a_bad_reviewer_id_is_a_400_not_a_409(client):
+    assert answer(client, "a%20b", "3").status_code == 400
+
+
+def test_one_reviewers_started_session_does_not_make_another_reviewers_answer_valid(client):
+    client.get("/onboarding/started")
+    assert answer(client, "started", "7 papers").status_code == 200
+    assert answer(client, "never-fetched", "7 papers").status_code == 409
+
+
+def test_an_answer_after_onboarding_closed_is_still_a_200_and_changes_nothing(client):
+    body = client.get("/onboarding/done").json()
+    while not body["done"]:
+        body = answer(client, "done", "idk").json()
+    n = rows()
+    r = answer(client, "done", "7 papers")
+    assert r.status_code == 200 and r.json()["done"] is True and rows() == n
 
 
 @pytest.mark.parametrize("rid", ["a%20b", "x" * 65, "a%3Ab"])
