@@ -125,3 +125,28 @@ own phrases back; do not map their answers onto a fixed rubric.
   frontend-only and not persisted; the backend onboarding step moves flow state to the backend.
 - Drafting gate (synth.py:224, main.py:314) is intentionally still in place until
   the loosening step. Do not change it earlier.
+
+
+  ## Frontend principles (chat-first, guided)
+- One column: a chat thread and one text box. That is the whole main screen.
+- Onboarding happens as the first messages of the same thread, one question at a
+  time. No separate form, no wizard.
+- No per-message buttons. Allowed UI: Send, a paperclip for paper upload, a small
+  "Review draft" toggle that opens a side panel (read, edit, copy all), and inline
+  choice chips only when onboarding returns a criteria menu for a novice.
+- Gaps, rewording, and drafting are requested by typing ("what's missing?",
+  "reword this", "draft it"), not by buttons.
+- The assistant leads: it may end a turn with one light nudge about the review.
+  Nudges are plain chat text, never buttons or popups.
+- The old guided part-by-part flow lives behind ?mode=guided and is not linked
+  from the UI. Do not change it.
+
+## Chat-first behavior
+- Tone: a helpful colleague, not a form. Acknowledge what the reviewer said in a
+  few words, vary phrasing, allow plain statements instead of always ending in a
+  question.
+- Nudges are about the REVIEW, never about the paper: at most one per turn, never
+  repeated once dismissed, never during onboarding, never right after a judgment
+  decline, never twice in a row.
+- Neutrality checks must not over-block: the fallback should almost never fire on
+  ordinary neutral messages.
