@@ -6,8 +6,9 @@ free-form reply needs: no stated opinion about the reviewer's take, no stock re-
 questions, a real decline when judgment was asked for, no unrequested summary.
 
 Over-blocking matters as much as leaking, so the reviewer's own words are licensed in one narrow place:
-a sentence addressed to them ("you said the baseline is weak"). Quoted text (the paper's words, or theirs) is
-never checked, and a few established technical terms ("weak supervision") are not evaluations.
+a sentence addressed to them ("you said the baseline is weak"), or a sentence that declines to rule on them
+("I can't say whether it is novel; that is your call"). Quoted text (the paper's words, or theirs) is never
+checked, and a few established technical terms ("weak supervision") are not evaluations.
 """
 import logging
 import re
@@ -99,12 +100,45 @@ def words(text):
     return set(re.findall(r"[a-z]+", (text or "").lower()))
 
 
+# The reviewer's word, reported as theirs: "you said ...", "you find the baseline weak", "your concern about ...",
+# "looks weak to you". Not "as you said, X is weak", which would endorse it.
+ATTRIB = re.compile(
+    r"\b(?:you(?:'ve|'d|'re|'ll|’ve|’d|’re|’ll)?\s+(?:\w+\s+){0,2}?(?:said|say|saying|mention\w*|"
+    r"note[ds]?|wrote|write|call(?:ed)?|describ\w*|flag\w*|find|found|think|thought|feel|felt|see|saw|consider\w*|"
+    r"believe\w*|worr\w*|suspect\w*|mean\w*|ask\w*|rais\w*|regard\w*)|"
+    r"your\s+(?:note|comment|point|concern|worry|view|take|read|assessment|criticism|words?|phrase|impression|sense))\b",
+    re.I)
+ATTRIB_NEAR = re.compile(r"\b(?:to|for) you\b|\bin your (?:view|opinion|eyes|words)\b|\baccording to you\b", re.I)
+ENDORSING = re.compile(r"\b(?:as|like|since|because|given)\s*$", re.I)
+
+
+def attributed(sent, word):
+    pat = r"\b" + re.escape(word) + r"\b"
+    for m in ATTRIB.finditer(sent):
+        if not ENDORSING.search(sent[:m.start()]) and re.search(pat, sent[m.start():m.start() + 140], re.I):
+            return True
+    return any(re.search(pat, sent[max(0, m.start() - 60):m.end() + 60], re.I) for m in ATTRIB_NEAR.finditer(sent))
+
+
+def licensed_here(sent, word, licensed):
+    """May the reviewer's own evaluative `word` appear in this sentence? Yes if the sentence reports it as theirs
+    ("you said the baseline is weak"), or is a decline that only NAMES it ("I can't say whether it is novel").
+    Not if the sentence merely addresses them ("that's your call") while asserting the word, or endorses it
+    ("as you said, the baseline is weak")."""
+    if word not in licensed:
+        return False
+    if attributed(sent, word):
+        return True
+    return bool(DECLINE_MARK.search(sent)) and bool(
+        re.search(r"\b(?:whether|if|about|on|regarding)\b[^.;]{0,40}\b" + re.escape(word) + r"\b", sent, re.I))
+
+
 def banned_hits(reply, licensed):
     hits = []
     for sent in SENT.split(TECH_TERMS.sub(" ", QUOTED.sub(" ", reply))):
         for m in BANNED.finditer(sent):
             w = m.group(0).lower()
-            if w in licensed and ADDRESSED.search(sent):
+            if licensed_here(sent, w, licensed):
                 continue
             hits.append(w)
     return hits
@@ -116,8 +150,7 @@ def scrubbed(reply, licensed):
     out = []
     for sent in SENT.split(TECH_TERMS.sub(" ", QUOTED.sub(" ", reply))):
         sent = OKAY.sub(" ", sent)
-        if ADDRESSED.search(sent):
-            sent = EVAL_WORD.sub(lambda m: "xx" if m.group(0).lower() in licensed else m.group(0), sent)
+        sent = EVAL_WORD.sub(lambda m: "xx" if licensed_here(sent, m.group(0).lower(), licensed) else m.group(0), sent)
         out.append(sent)
     return ". ".join(out)
 
