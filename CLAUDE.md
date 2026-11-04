@@ -84,8 +84,28 @@ own phrases back; do not map their answers onto a fixed rubric.
   PDFs, default `data`). Point them at a temp dir in tests.
 - Frontend: React (App.jsx); conversation flow is an implicit state machine in
   `flow = useRef(...)` with stages ask/confirm/offer/score/draft/free.
-- 16 *_SYS prompts across 8 backend files; each composes the shared NEUTRALITY block
-  from `prompts.py`.
+- 18 *_SYS prompts (16 across 8 backend files, plus `onboarding.TOPIC_SYS` and
+  `prompts.CHAT_SYS`); each composes the shared NEUTRALITY block from `prompts.py`.
+  `prompts.py` is also the one place for the PROFILE block and the chat prompt assembly.
+- Chat-first backend: `POST /chat/{pid}` (body `{reviewer_id, message}`) -> `chatflow.turn`.
+  Until onboarding closes the message goes to the onboarding rules (with a short
+  acknowledgement before each next question); after that it is free conversation. The prompt
+  = NEUTRALITY + PROFILE (the reviewer's own quoted phrases) + paper text + review draft +
+  last 20 turns in full. `chat_checks.reply_errors` runs on every reply (verify.BANNED and
+  llm.JUDGE, unchanged, plus opinion / stock-re-ask / pile-of-questions / decline /
+  unrequested-summary checks; the reviewer's own words are licensed only when attributed to
+  them); on failure: regenerate once, then a neutral fallback; outcomes are logged
+  (`chat_check` events, `store.chat_check_stats`, logger `copilot.chat`).
+  Capture (view -> offer -> `note_added`, editable/removable through `/events`), reword
+  (stance words must survive), gap reports, non-blocking paper-conflict notes
+  (`pointers.check` + fixed template) and drafting (never blocked; `synth.make_draft` and its
+  gate are untouched) are server code over the event log. `coverage.py` = gap report;
+  `nudges.py` = silent coverage map + at most one nudge per turn (gates: not during onboarding,
+  not after a decline, not twice in a row, only at a natural pause; dismissed or twice-ignored
+  nudges never repeat). `store.fold_chat` replays the chat events.
+- Flow toggle: `COPILOT_FLOW=chat` (default) or `guided` (turns `/chat` off with a 409);
+  `GET /config` reports it. The old guided flow's endpoints and source files are unchanged;
+  the frontend keeps it behind `?mode=guided`.
 - Onboarding: `onboarding.py` holds pure rules (next question, defaults, one follow-up
   per field, rule-based extraction, 14-turn cap, experience inference, criteria menu,
   form walkthrough). `store.fold_onboarding` replays `profile_field_set`,
@@ -112,7 +132,7 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: .\.venv\Scripts\python.exe -m pytest (789 tests + 2 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
+- Python: .\.venv\Scripts\python.exe -m pytest (871 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
   HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient; tests/conftest.py
   points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
 - Frontend: node --test tests/loops/*.test.mjs (12 tests)

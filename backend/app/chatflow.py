@@ -239,8 +239,8 @@ def resolve_nudge(pid, st, message, sections):
     msg = message.strip()
     if nudges.NOT_NOW.search(msg) or chat.NO.match(msg):
         outcome = "dismissed"
-    elif sid in nudges.mentions(msg, sections) or chat.YES.match(msg):
-        outcome = "followed"
+    elif sid in nudges.mentions(msg, sections) or (chat.YES.match(msg) and not nudges.ACK_ONLY.match(msg)):
+        outcome = "followed"      # they went there, or said yes. A bare "ok" only acknowledges: it is not following.
     else:
         outcome = "ignored"
     store.log(pid, "nudge_resolved", {"section": sid, "outcome": outcome})

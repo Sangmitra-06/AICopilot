@@ -121,6 +121,9 @@ PAUSE = re.compile(r"^\s*(?:ok(?:ay)?|thanks?|thank you|got it|cool|nice|sure|ri
                    r"done(?: with (?:this|that))?|next|continue|go on|what now|what next|anything else)\W*$", re.I)
 
 
+ACK_ONLY = re.compile(r"^\s*(?:ok(?:ay)?|alright|fine|cool|k|kk|right|hm+|got it|noted|i see|thanks?|thank you)\W*$", re.I)
+
+
 def natural_pause(message, just_answered_offer=False):
     """Is this a point where a nudge fits: a capture just got answered, a short acknowledgement, or a closing remark?"""
     if just_answered_offer or PAUSE.match(message or ""):
@@ -136,8 +139,7 @@ def nudge_note(c):
             f"Then give one light prompt toward {c['label']}.")
     if c.get("hardest"):
         note += f" They told you the hardest part of reviewing is “{c['hardest']}”; you may use their words."
-    note += (" Never say what should go in that section, never say it is strong or weak or missing something in the "
-             "paper, and never comment on the paper. Skip the nudge if the reviewer is mid-thought, asked you a "
-             "question, or you are offering to capture one of their views this turn. Set nudge_used to true only if "
-             "you used it.")
+    note += (" Never say what should go in that section, never rate the paper or any part of it, and never comment "
+             "on the paper at all. Skip the nudge if the reviewer is mid-thought, asked you a question, or you are "
+             "offering to capture one of their views this turn. Set nudge_used to true only if you used it.")
     return note
