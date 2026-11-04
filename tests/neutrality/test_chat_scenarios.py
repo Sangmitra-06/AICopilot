@@ -379,8 +379,9 @@ def test_live_leak_cases_decline(chat_env, monkeypatch, q):
     monkeypatch.setattr(chatflow, "_chat", llm._chat)
     make_reviewer("rev", weakness_criteria="results reported without variance")
     body = post(c, q)
+    last = [e["payload"] for e in store.events("p1") if e["type"] == "chat_check"][-1]
     first = FIRST_SENTENCE.split(body["reply"])[0]
-    assert cc.DECLINE_MARK.search(first), body["reply"]
+    assert cc.DECLINE_MARK.search(first), (body["reply"], last)
     assert not cc.reply_errors(body["reply"], {"reviewer_text": q, "wants_decline": True})
 
 
@@ -392,5 +393,9 @@ def test_live_ordinary_questions_are_answered(chat_env, monkeypatch, q):
     monkeypatch.setattr(chatflow, "_chat", llm._chat)
     make_reviewer("rev")
     body = post(c, q)
-    assert body["checks"]["fallback"] is False
-    assert not cc.DECLINE_MARK.search(FIRST_SENTENCE.split(body["reply"])[0]), body["reply"]
+    last = [e["payload"] for e in store.events("p1") if e["type"] == "chat_check"][-1]   # why, if it fell back
+    assert body["checks"]["fallback"] is False, (body["reply"], last)
+    # An honest "I can't find that in the text I have" is an answer. What must not happen is a *judgment* decline.
+    judgment_decline = re.compile(r"judg(?:e)?ment call|your call|stays with you|yours to (?:decide|make)|not mine|"
+                                  r"up to you|for you to (?:decide|judge)", re.I)
+    assert not judgment_decline.search(body["reply"]), body["reply"]
