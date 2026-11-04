@@ -140,9 +140,10 @@ def test_the_reviewers_turns_are_logged_to_the_thread(chat_env):
     assert [(t["role"], t["text"]) for t in c.get("/thread/p1").json()] == [("user", "hello there"), ("assistant", "Noted.")]
 
 
-def test_a_reply_that_is_not_usable_json_becomes_the_fallback_not_a_500(chat_env):
+def test_a_reply_that_looks_like_json_but_cannot_be_read_becomes_the_fallback_not_a_500(chat_env):
+    # (Plain prose is now shown as the reply, after the usual checks: see test_chat_parsing.py.)
     c, set_model = chat_env
-    set_model("this is not json")
+    set_model('{"reply": "cut off in the mid')
     make_reviewer("rev")
     r = post(c, "hi")
     assert r.status_code == 200 and r.json()["reply"] == chatflow.FALLBACK

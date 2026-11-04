@@ -431,33 +431,81 @@ def nudge_in(reply, nudge):
     return any(re.search(r"\b" + re.escape(w), low) for w in nudges.section_words(sec))
 
 
+FENCE_OPEN = re.compile(r"^\s*```[A-Za-z0-9_-]*[ \t]*\n?")
+FENCE_CLOSE = re.compile(r"\n?[ \t]*```\s*$")
+RAW_LOG_CHARS = 500
+BAD_FORMAT = ("Your last reply was empty or was not in the required format. Answer again as one JSON object with a "
+              "non-empty \"reply\" (the other keys may be empty).")
+
+
+def parse_reply(raw):
+    """Read the model's output as (parsed dict, reply text, form). Tolerant, in this order:
+      json      the whole output is a JSON object with a "reply"
+      fenced    the same, inside a ``` code fence
+      embedded  a JSON object with a "reply" somewhere in surrounding text (the first one wins)
+      prose     plain text with no JSON at all: the text is the reply and every other field is empty
+      empty     nothing usable (blank, a JSON object with no reply, or JSON-looking text that does not parse)
+    Whatever the form, the reply still goes through the neutrality checks afterwards."""
+    text = raw.strip() if isinstance(raw, str) else ""
+    if not text:
+        return {}, "", "empty"
+    bare = FENCE_CLOSE.sub("", FENCE_OPEN.sub("", text, count=1), count=1).strip()
+    for form, candidate in (("json", text), ("fenced", bare)):
+        try:
+            j = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(j, dict):
+            reply = str(j.get("reply") or "").strip()
+            return (j, reply, form) if reply else ({}, "", "empty")
+        if isinstance(j, str) and j.strip():
+            return {}, j.strip(), "prose"         # the model returned just a JSON string: that is the reply
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"\{", text):
+        try:
+            j, _ = decoder.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if isinstance(j, dict) and str(j.get("reply") or "").strip():
+            return j, str(j["reply"]).strip(), "embedded"
+    if bare.startswith(("{", "[")) or '"reply"' in bare:
+        return {}, "", "empty"          # looks like JSON but is not readable: never show it as if it were prose
+    return {}, bare, "prose"
+
+
 def call_model(msgs):
-    """One model call -> (parsed JSON, reply text, raw output). Raises ValueError if the output is not usable."""
+    """One model call -> (parsed dict, reply text, raw output, form). A reply that cannot be read is logged with the
+    start of what came back, so the cause can be seen."""
     raw = _chat(msgs)
-    j = json.loads(raw)
-    reply = str(j.get("reply") or "").strip()
-    if not isinstance(j, dict) or not reply:
-        raise ValueError("no reply in the model output")
-    return j, reply, raw
+    j, reply, form = parse_reply(raw)
+    if form != "json":
+        log.warning("chat model reply was not plain JSON (read as %s); raw[:%d] = %r", form, RAW_LOG_CHARS,
+                    (raw if isinstance(raw, str) else repr(raw))[:RAW_LOG_CHARS])
+    return j, reply, raw, form
 
 
 def generate_checked(msgs, ctx, phrases):
     """Every reply passes chat_checks.reply_errors. On failure: regenerate once, then a short neutral fallback.
+    An empty or unreadable reply is retried once with a short instruction to answer in the required format.
     Returns (reply, info, parsed json) where info feeds the chat_check log."""
-    errs, raw = [], ""
+    errs, raw, form = [], "", None
     for attempt in (1, 2):
         try:
-            j, reply, raw = call_model(msgs)
-            errs = chat_checks.reply_errors(reply, {**ctx, "reword": j.get("reword")})
+            j, reply, raw, form = call_model(msgs)
+            if form == "empty":
+                errs, retry = ["the reply was empty or not in the required format"], BAD_FORMAT
+            else:
+                errs = chat_checks.reply_errors(reply, {**ctx, "reword": j.get("reword")})
+                retry = chat_checks.correction(errs)
         except Exception as e:  # a down or garbling model is a failed attempt, never a 500
             log.warning("chat model call failed: %r", e)
-            j, reply, errs = {}, "", ["the model call failed or returned unusable output"]
+            j, reply, form = {}, "", "error"
+            errs, retry = ["the model call failed or returned unusable output"], BAD_FORMAT
         if not errs:
-            return reply, {"attempts": attempt, "fallback": False, "errors": []}, j
-        msgs = msgs + [{"role": "assistant", "content": raw or "{}"},
-                       {"role": "user", "content": chat_checks.correction(errs)}]
+            return reply, {"attempts": attempt, "fallback": False, "errors": [], "form": form}, j
+        msgs = msgs + [{"role": "assistant", "content": raw or "{}"}, {"role": "user", "content": retry}]
     fallback = chat_checks.decline_fallback(phrases) if ctx.get("wants_decline") else chat_checks.FALLBACK
-    return fallback, {"attempts": 2, "fallback": True, "errors": errs}, {}
+    return fallback, {"attempts": 2, "fallback": True, "errors": errs, "form": form}, {}
 
 
 # Brief acknowledgements for onboarding answers. They say "I heard you", never "that was a good answer": no
