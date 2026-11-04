@@ -128,6 +128,16 @@ def the(said):
     return said if said.startswith("section") else "the " + said
 
 
+# Words that rate. The app repeats a paper heading in its own line only if none of these is in it (verify.BANNED and the
+# chat checks are consulted too; this list adds the ones CLAUDE.md names that those do not carry).
+EXTRA_EVAL = re.compile(r"\b(?:limited|poor|excellent|great|good|bad|clear|unclear|thorough|superior|inferior|better|"
+                        r"worse|best|worst|lacking|insufficient|adequate|inadequate|rigorous|robust|elegant)\b", re.I)
+
+
+def rates(text):
+    return bool(chat_checks.banned_hits(text, set()) or chat_checks.EVAL_WORD.search(text) or EXTRA_EVAL.search(text))
+
+
 def title_phrase(title):
     """A section as a phrase, from the paper's own heading: "3 Method" -> "the method"."""
     rest = re.sub(r"^\s*(?:\d+(?:\.\d+)*\.?|[A-Z]\.)\s+", "", title).strip()
@@ -137,7 +147,7 @@ def title_phrase(title):
     else:
         phrase = rest[:1].lower() + rest[1:]
     phrase = "the " + phrase if phrase else "the next section"
-    return "the next section" if chat_checks.banned_hits(phrase, set()) else phrase
+    return "the next section" if rates(phrase) else phrase
 
 
 def where(entry):
@@ -159,3 +169,72 @@ def opening_line(entry, spans):
 
 
 GUIDE_HINT = "Say “next” when you want to move on, name any part to go straight there, or tell me to stop guiding."
+
+
+# ------------------------------------------------------------------ reading the reviewer's message during the walk
+
+_ACK = r"(?:ok(?:ay)?|alright|cool|great|thanks?|thank you|yes|yeah|yep|sure|right|fine|so|and|please)"
+ADVANCE = re.compile(
+    r"^\W*(?:" + _ACK + r"\W+)*(?:ok(?:ay)?|alright|cool|fine|kk?|got it|understood|noted|makes sense|i see|"
+    r"next(?:\s+(?:one|section|part|please))?|(?:let(?:'|’)?s )?move on|moving on|go on|continue|keep going|carry on|"
+    r"proceed|done(?:\s+with\s+(?:this|that|it|the section|this section))?|i(?:'|’)?m done|finished|ready|"
+    r"what(?:'|’)?s next|onward)(?:\W+(?:please|thanks?|thank you))?\W*$", re.I)
+
+STOP = re.compile(
+    r"\b(?:stop|quit|end|cancel|drop|disable|turn off|switch off)\s+(?:the\s+|this\s+|all\s+|your\s+|that\s+)?"
+    r"(?:guid\w*|walk\w*|tour|prompting|nudg\w*|leading me)\b|\bno more (?:guid\w*|walk\w*|nudg\w*|prompt\w*)\b|"
+    r"\bdon(?:'|’)?t (?:guide|lead|walk|nudge|prompt) me\b|\b(?:i(?:'|’)?ll|i will|let me) (?:take it|go|do it|drive) "
+    r"from here\b|\bi(?:'|’)?ve got it from here\b", re.I)
+
+JUMP = re.compile(
+    r"^\W*(?:(?:ok(?:ay)?|now|so|actually|please|and)\W+)*"
+    r"(?:(?:let(?:'|’)?s|can we|could we|can you|could you|i(?:'|’)?d like to|i want to|i(?:'|’)?ll|let me)\s+)?(?:please\s+)?"
+    r"(?:(?:go|jump|move|skip|head|turn)(?:\s+(?:straight|directly|right|ahead|back|over|on))*\s+to|take me to|bring me to|"
+    r"show me|look at|looking at|read|open|start with|begin with|see)\s+(?P<what>[^?]{1,60}?)\W*(?:please)?\W*$", re.I)
+_FILLER = re.compile(r"\b(?:the|a|an|section|sections|part|parts|of|paper|again|now|please|first|bit|to|over|there|it|"
+                     r"then|straight|directly|right|ahead)\b", re.I)
+
+
+def jump_target(message, sections):
+    """{"section", "said"} when the whole message is a request to go to a part of the paper ("go to results", "take me to
+    section 3"); None for anything else, including a request that asks for more than the move."""
+    m = JUMP.match(message or "")
+    if not m:
+        return None
+    what = m.group("what")
+    found = mentions(what, sections)
+    if not found:
+        return None
+    hit = _WORD_RE.sub(" ", what)
+    if _FILLER.sub(" ", hit).strip(" ,.;:-	"):
+        return None                                  # "go to results and tell me if ...": more than a move
+    titles, said = found[0]
+    return {"section": titles[0], "said": said}
+
+
+def next_index(w):
+    """The next section in the order that has not been shown, after the pointer; None when the order is used up."""
+    for i in range((w["pointer"] if w["pointer"] is not None else -1) + 1, len(w["order"])):
+        if w["order"][i]["section"] not in w["covered"]:
+            return i
+    return None
+
+
+def active(w):
+    return bool(w["opened"] and w["order"] and not w["stopped"])
+
+
+
+
+def move_line(entry, spans, n, kind="advance"):
+    """The line that takes the reviewer to a section: "Moving to the methods, as you said." The reviewer's own word is
+    used when they named the part, "as you asked" after a jump, and nothing is claimed for a part they did not name."""
+    x = where(entry)
+    if kind == "jump":
+        return marked(f"Going to {x}, as you asked", spans, entry["section"])
+    why = ", as you said" if entry.get("said") else ""
+    return marked(f"Moving to {x}{why}", spans, entry["section"])
+
+
+STOPPED = "Okay, I'll stop guiding. Ask for anything you want from here, and I'll follow."
+LAST = "That was the last section in your order."

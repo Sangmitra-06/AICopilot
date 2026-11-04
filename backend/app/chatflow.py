@@ -285,6 +285,8 @@ def choose_nudge(pid, spans, view, phrases, st, message, ruled, wants_decline):
     last = (st["last_assistant"] or {}).get("meta") or {}
     if wants_decline or last.get("declined") or last.get("nudge"):
         return None
+    if store.walk_state(pid)["stopped"]:                  # "stop guiding" means the app's prompting too
+        return None
     if not nudges.natural_pause(message, just_answered_offer=bool(ruled)):
         return None
     reading = ((view["fields"] or {}).get("reading_order") or {}).get("value")
@@ -416,7 +418,7 @@ def turn(pid, rid, message, spans):
     st = store.chat_state(pid)
     variant = sum(1 for h in hist if h["role"] == "assistant")
     out = {"mode": "chat", "capture": None, "resolved": None, "reword": None, "conflicts": [], "gaps": None,
-           "drafted": None, "nudge": None, "cites": [], "parts": None, "added": None}
+           "drafted": None, "nudge": None, "cites": [], "parts": None, "added": None, "walk": None}
     meta = {}
 
     ruled = resolve_by_rule(pid, st, message, names)  # a bare "yes"/"no" to the capture offered last turn
@@ -431,7 +433,13 @@ def turn(pid, rid, message, spans):
             store.log(pid, "section_promised", {"section": sid})
     st = dict(store.chat_state(pid), last_assistant=previous)
 
-    if GAP_REQ.search(message) or GAP_REQ2.search(message):
+    w = store.walk_state(pid)
+    wt = walk_turn(pid, spans, message, w, ruled, variant) if walk.active(w) else None
+    if wt:                                                # a walk signal: the app answers it itself, no model call
+        out.update(reply=wt["reply"], parts=wt["parts"], cites=wt["cites"], gaps=wt.get("gaps"), walk=wt["walk"],
+                   checks={"attempts": 0, "fallback": False})
+        meta["intent"], meta["walk"] = "walk", wt["walk"]["section"] or wt["walk"]["kind"]
+    elif GAP_REQ.search(message) or GAP_REQ2.search(message):
         out["reply"], out["gaps"] = gap_reply(pid, spans, variant)
         out["reply"] = add_line(pid, out, names, out["reply"])
         out["checks"] = {"attempts": 0, "fallback": False}
@@ -444,6 +452,8 @@ def turn(pid, rid, message, spans):
     else:
         model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled, variant, out, meta)
 
+    if not wt and walk.active(w):
+        move_on_after_capture(pid, spans, w, out, meta)
     out.pop("_vid", None)
     out["draft_changed"] = (out["resolved"] or {}).get("outcome") == "accepted" or bool((out["drafted"] or {}).get("drafted"))
     log_chat(pid, "user", message)
@@ -451,6 +461,59 @@ def turn(pid, rid, message, spans):
         meta["cites"], meta["parts"] = [c["id"] for c in out["cites"]], out["parts"]
     log_chat(pid, "assistant", out["reply"], **meta)
     return out
+
+
+def walk_turn(pid, spans, message, w, ruled, variant):
+    """The guided walk's answer to the reviewer's message, written by the app (no model, nothing about the paper), or None
+    when the message is not a walk signal: "stop guiding"; a jump ("go to results"), which resets the pointer; or a done
+    signal ("ok", "next", "got it", "move on"), which moves to the next section that has not been shown. A done signal
+    that answers a pending capture offer is that answer instead (see move_on_after_capture)."""
+    msg, order = message.strip(), w["order"]
+
+    def moved(i, kind, entry):
+        store.log(pid, "walk_at", {"index": i, "section": entry["section"], "reason": kind})
+        text = walk.move_line(entry, spans, len(w["covered"]), kind)
+        shown, parts, found = cites.extract(text, spans)
+        return {"reply": shown, "parts": parts, "cites": found, "walk": {"kind": kind, "section": entry["section"]}}
+
+    if walk.STOP.search(msg):
+        store.log(pid, "walk_stopped", {})
+        return {"reply": walk.STOPPED, "parts": None, "cites": [], "walk": {"kind": "stop", "section": None}}
+    jump = walk.jump_target(msg, walk.real_sections(spans))
+    if jump:
+        i = next((k for k, e in enumerate(order) if e["section"] == jump["section"]), None)
+        if i is not None:
+            return moved(i, "jump", {"section": jump["section"], "said": jump["said"]})
+    if ruled or w["done"] or not walk.ADVANCE.match(msg):
+        return None
+    i = walk.next_index(w)
+    if i is not None:
+        return moved(i, "advance", order[i])
+    store.log(pid, "walk_done", {})
+    text, report = gap_reply(pid, spans, variant)
+    return {"reply": walk.LAST + PARA + text, "parts": None, "cites": [], "gaps": report,
+            "walk": {"kind": "end", "section": None}}
+
+
+def move_on_after_capture(pid, spans, w, out, meta):
+    """The reviewer has just finished a point (a capture was accepted this turn): after the confirmation, move to the next
+    section. Not when this turn already carries a nudge or a fresh offer, a gap list or a draft (one prompt per turn)."""
+    if (out["resolved"] or {}).get("outcome") != "accepted" or out["nudge"] or out["capture"] or out["gaps"]             or (out["drafted"] or {}).get("drafted") or meta.get("intent") in ("gap_report", "draft") or meta.get("declined"):
+        return
+    i = walk.next_index(w)
+    if i is None:
+        return
+    entry = w["order"][i]
+    store.log(pid, "walk_at", {"index": i, "section": entry["section"], "reason": "capture"})
+    shown, parts, found = cites.extract(walk.move_line(entry, spans, len(w["covered"])), spans)
+    before = out["reply"]
+    base = out["parts"] or [{"text": before, "cite": None}]
+    out["reply"] = before + PARA + shown
+    out["parts"] = cites.reconcile(base + [{"text": PARA, "cite": None}] + (parts or [{"text": shown, "cite": None}]),
+                                   out["reply"])
+    out["cites"] = found + [c for c in out["cites"] if c["id"] not in {f["id"] for f in found}]   # the new section first
+    out["walk"] = {"kind": "capture", "section": entry["section"]}
+    meta["walk"] = entry["section"]
 
 
 def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled, variant, out, meta):
