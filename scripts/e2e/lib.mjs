@@ -156,8 +156,17 @@ export function startBackend(tmp, extraEnv = {}) {
     { cwd: path.join(ROOT, 'backend'), env, stdio: ['ignore', logFd, logFd] }))
 }
 
-export function makePaper(file) {
-  const r = spawnSync(pythonPath(), [path.join(ROOT, 'scripts', 'e2e', 'make_paper.py'), file], { encoding: 'utf8' })
+// The real backend with a scripted model (scripts/e2e/scripted_backend.py): no key and no network call.
+export function startScriptedBackend(tmp) {
+  fs.mkdirSync(OUT, { recursive: true })
+  const logFd = fs.openSync(path.join(OUT, 'backend.log'), 'w')
+  const env = { ...process.env, COPILOT_DB: path.join(tmp, 'events.db'), COPILOT_DATA_DIR: path.join(tmp, 'data') }
+  return track(spawn(pythonPath(), [path.join(ROOT, 'scripts', 'e2e', 'scripted_backend.py'), String(PORTS.backend)],
+    { cwd: path.join(ROOT, 'backend'), env, stdio: ['ignore', logFd, logFd] }))
+}
+
+export function makePaper(file, extra = []) {
+  const r = spawnSync(pythonPath(), [path.join(ROOT, 'scripts', 'e2e', 'make_paper.py'), file, ...extra], { encoding: 'utf8' })
   if (r.status !== 0) throw new Error('could not build the test PDF (is pymupdf installed in the project venv?)')
   return file
 }

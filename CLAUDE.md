@@ -89,7 +89,18 @@ own phrases back; do not map their answers onto a fixed rubric.
   flow). All behaviour is React-free and tested: `controller.js` (stages boot -> onboarding ->
   attach -> chat; 409 shows the returned question; a failure is one plain sentence, sending
   again retries), `api.js`, `draftModel.js`, `flow.js`. Components: Root > ChatApp > ChatView >
-  { Thread (Message, Chip), Composer, "Review draft" toggle, DraftPanel > DraftItem }.
+  { PdfViewer (after upload), Thread (Message, Chip, Cite), Composer, "Review draft" toggle,
+  DraftPanel > DraftItem }. The PDF pane (`frontend/src/pdf/`: PdfViewer, PdfPage, pdf.css) shows
+  the paper on the left once one is attached; the draft panel then opens over the chat column; below
+  900px wide the pane is hidden. `citeModel.js` (React-free, tested) maps citations to highlights; the
+  controller holds `spans` (id -> page and box, from `GET /papers/{pid}/spans` plus what replies
+  carry) and one `focus` (the spans on show). The focus changes only when a reply cites a span that
+  can be located, when a pointer in a reply is clicked, or when the reviewer drags a box on the page
+  (`POST /select`, the text goes into the text box as a quotation); a reply that cites nothing, a gap
+  report, a draft, a nudge or the fallback never moves the PDF. Spans that cannot be located fail quietly.
+  **`PdfViewer`/`PdfPage` deliberately DUPLICATE the viewer logic in `Page`/`Viewer` of `App.jsx`
+  (old guided flow, which must not be modified): keep the two copies in sync, or delete one when the
+  old flow is removed.**
   Onboarding uses `/onboarding/*` (no paper yet), then `/chat/{pid}` after upload; the reviewer
   id and paper id are kept in localStorage. `POST /onboarding/{rid}/answer` returns an `ack`
   (a plain, varied "Got it." / "Thanks.") only after a real answer, never after a skip, an
@@ -97,6 +108,16 @@ own phrases back; do not map their answers onto a fixed rubric.
 - 19 *_SYS prompts (16 across 8 backend files, plus `onboarding.TOPIC_SYS`,
   `prompts.CHAT_SYS` and `prompts.VIEW_SYS`); each composes the shared NEUTRALITY block from `prompts.py`.
   `prompts.py` is also the one place for the PROFILE block and the chat prompt assembly.
+- Citations (`cites.py`): the chat prompt's POINTING AT THE PAPER block asks the model to put a
+  span's `[id]` after a sentence only when the reply refers to that passage, never to support an
+  evaluation. `chatflow` strips the markers (the reviewer sees a plain "(Section 4)", never an id),
+  drops ids that are not spans of the paper (and spans the prompt never showed: references, stray
+  text), and returns `cites` ([{id, page, bbox, section, lines}]) and `parts` (the text cut into
+  plain pieces with the pointers marked) in the `/chat` response; both are stored in the
+  `chat_turn` meta so a reload keeps the pointers. The neutrality checks run on the displayed text
+  AND on the marker-free text (`chatflow.checked_errors`), so a marker can never hide a blocked
+  phrase. Gap reports, drafts, nudges and the fallback cite nothing. `verify.py` and `llm.JUDGE` are
+  untouched.
 - Chat-first backend: `POST /chat/{pid}` (body `{reviewer_id, message}`) -> `chatflow.turn`.
   Until onboarding closes the message goes to the onboarding rules (with a short
   acknowledgement before each next question); after that it is free conversation. The prompt
@@ -147,7 +168,7 @@ reports today; update them when they change.
 
 1. **Python** (all backend tests, including the old-flow Python loop tests):
    `.\.venv\Scripts\python.exe -m pytest`
-   -> 1149 passed, 8 skipped (1157 collected: tests/neutrality 696, tests/onboarding 418,
+   -> 1436 passed, 8 skipped (1444 collected: tests/neutrality 741, tests/onboarding 660,
    tests/loops 43). The 8 skipped are the `live` tests (item 5); any other live model call must
    fail loudly. HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
    tests/conftest.py points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
@@ -156,12 +177,12 @@ reports today; update them when they change.
    -> 12 tests.
 3. **Chat-first frontend tests** (node):
    `node --test tests/chat/*.test.mjs`
-   -> 93 tests: controller, API client, draft model, flow switch, criteria chips, the browser
-   scripts' skip logic, and a render test that loads the real components through Vite's SSR
-   loader and lists every control on screen.
-   Both node suites together: `node --test tests/loops/*.test.mjs tests/chat/*.test.mjs` -> 105.
+   -> 137 tests: controller, API client, draft model, flow switch, criteria chips, citations to
+   highlights (`cites.test.mjs`), the browser scripts' skip logic, and a render test that loads the
+   real components through Vite's SSR loader and lists every control on screen (PDF pane included).
+   Both node suites together: `node --test tests/loops/*.test.mjs tests/chat/*.test.mjs` -> 149.
 4. **Frontend build** (run in frontend/): `npm run build`. Optional lint of the chat code, also
-   in frontend/: `npx oxlint src/chat src/main.jsx` (should print nothing).
+   in frontend/: `npx oxlint src/chat src/main.jsx src/pdf` (should print nothing).
 5. **Live-model tests** (not in the default run; real model calls with the real key):
    put the real OPENROUTER_API_KEY and MODEL from backend/.env into the environment first
    (tests/conftest.py otherwise gives them dummy values), then
@@ -170,7 +191,8 @@ reports today; update them when they change.
 6. **Browser end-to-end check** (not in the default run; needs Chrome and a built frontend):
    `node scripts/e2e/drive.mjs` (full journey; a few real model calls, needs the key in
    backend/.env), `node scripts/e2e/drive.mjs --offline` (no model, no key),
-   `node scripts/e2e/drive-guided.mjs` (old flow shown by a guided-mode backend).
+   `node scripts/e2e/drive-guided.mjs` (old flow shown by a guided-mode backend),
+   `node scripts/e2e/drive-pdf.mjs` (the PDF pane: real backend, scripted model, no key; 31 checks).
    They print PASS/FAIL per check, exit 1 on a failure, and skip (exit 0) with a reason if
    Chrome, the key or the built frontend is missing. See "End-to-end browser check" in readme.md.
 
@@ -195,12 +217,20 @@ reports today; update them when they change.
 
 
   ## Frontend principles (chat-first, guided)
-- One column: a chat thread and one text box. That is the whole main screen.
-- Onboarding happens as the first messages of the same thread, one question at a
+- Layout: before a paper is attached, a centered chat column. After upload, the
+  PDF on the left and the chat on the right, with no added controls. The viewer
+  follows the conversation: when a reply cites paper spans, it scrolls to them and
+  highlights them automatically in one neutral colour. Highlights only locate text
+  the reply cites or the reviewer selected; they never express an evaluation and
+  are never added unprompted.
+  - Onboarding happens as the first messages of the same thread, one question at a
   time. No separate form, no wizard.
 - No per-message buttons. Allowed UI: Send, a paperclip for paper upload, a small
   "Review draft" toggle that opens a side panel (read, edit, copy all), and inline
   choice chips only when onboarding returns a criteria menu for a novice.
+- The PDF pane adds no buttons or toggles. Its only marks are page-number labels ("p4"),
+  highlights (one neutral colour) and the rectangle shown while dragging a box. A pointer in a
+  reply, "(Section 4)", is plain text, not a button; clicking it shows its highlight again.
 - Gaps, rewording, and drafting are requested by typing ("what's missing?",
   "reword this", "draft it"), not by buttons.
 - The assistant leads: it may end a turn with one light nudge about the review.

@@ -28,6 +28,9 @@ export function createApi(fetchImpl = (...a) => fetch(...a), base = API_BASE) {
       return call('/papers', { method: 'POST', body: fd })
     },
     thread: pid => call(`/thread/${seg(pid)}`),
+    spans: pid => call(`/papers/${seg(pid)}/spans`),
+    select: (pid, page, rect) => call('/select', post({ paper_id: pid, page, rect })),
+    pdfUrl: pid => `${base}/papers/${seg(pid)}/pdf`,
     criteria: () => call('/criteria'),
     notes: pid => call(`/notes/${seg(pid)}`),
     draft: pid => call(`/draft/${seg(pid)}`),

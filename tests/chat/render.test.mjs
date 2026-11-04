@@ -166,3 +166,51 @@ test('dropping a file onto the thread highlights it with no extra screen', () =>
   assert.match(m, /class="ca-root ca-drag"/)
   assert.deepEqual(buttons(m), ['Review draft', 'Attach paper', 'Send'])
 })
+
+// ------------------------------------------------------------------ the PDF pane (after a paper is attached)
+
+const PARTS = [{ text: 'Table 2 has the numbers ', cite: null }, { text: '(Section 4)', cite: ['s4'] }, { text: '.', cite: null }]
+const withPaper = over => html({
+  pane: React.createElement('div', { className: 'pdf-scroller' }, React.createElement('div', { className: 'pdf-page' })),
+  onCite() {}, state: state({ paperId: 'p1', messages: [{ id: 1, role: 'assistant', text: 'Table 2 has the numbers (Section 4).', parts: PARTS }] }), ...over,
+})
+
+test('with a paper the PDF is on the left of the chat, and there is no pane before one is attached', () => {
+  const m = withPaper()
+  assert.ok(m.indexOf('class="ca-pdf"') > -1 && m.indexOf('class="ca-pdf"') < m.indexOf('class="ca-main"'))
+  assert.match(m, /class="ca-root ca-with-pdf"/)
+  assert.ok(!html().includes('ca-pdf') && !html().includes('ca-with-pdf'))
+})
+
+test('the PDF pane adds no controls: the same three buttons and one text box', () => {
+  const m = withPaper()
+  assert.deepEqual(buttons(m), ['Review draft', 'Attach paper', 'Send'])
+  assert.deepEqual(controls(m).filter(c => c.kind !== 'button'), [{ kind: 'textarea', label: 'Message' }])
+})
+
+test('a pointer in a reply is plain text, not a button, and no span id is on screen', () => {
+  const m = withPaper()
+  assert.match(m, /Table 2 has the numbers <span class="ca-cite" tabindex="0">\(Section 4\)<\/span>\./)
+  assert.ok(!/\bs4\b/.test(m.replace(/class="[^"]*"/g, '')))
+  assert.ok(!m.includes('[s4]'))
+  assert.deepEqual(buttons(m), ['Review draft', 'Attach paper', 'Send'])
+})
+
+test('a message without pointers renders exactly as before, with or without the pane', () => {
+  const messages = [{ id: 1, role: 'assistant', text: 'Hello' }]
+  assert.match(withPaper({ state: state({ paperId: 'p1', messages }) }), /<p class="ca-msg ca-assistant">Hello<\/p>/)
+  assert.match(html({ state: state({ messages }) }), /<p class="ca-msg ca-assistant">Hello<\/p>/)
+})
+
+test('the draft panel still opens as a toggle next to the PDF pane', () => {
+  const m = withPaper({ draftOpen: true })
+  assert.ok(m.includes('class="ca-pdf"') && m.includes('ca-panel'))
+  assert.deepEqual(buttons(m).slice(0, 1), ['Review draft'])
+})
+
+test('the real PDF viewer renders as an empty scroller until the document loads, and nothing without a url', async () => {
+  const Viewer = (await server.ssrLoadModule('/src/pdf/PdfViewer.jsx')).default
+  const on = renderToStaticMarkup(React.createElement(Viewer, { url: 'http://x/p.pdf', focus: null, onSelect() {} }))
+  assert.equal(on, '<div class="pdf-scroller"></div>')
+  assert.equal(renderToStaticMarkup(React.createElement(Viewer, { url: null, focus: null, onSelect() {} })), '')
+})

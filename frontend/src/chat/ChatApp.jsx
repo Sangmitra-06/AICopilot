@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import ChatView from './ChatView.jsx'
 import { createApi } from './api.js'
 import { createController, browserStorage } from './controller.js'
 import { buildSections, copyText, editEvent } from './draftModel.js'
 import { selectedLabels, toggleLabel } from './chips.js'
+import { quoteInto } from './citeModel.js'
+
+// The PDF viewer (and pdf.js with it) is loaded only once a paper is attached.
+const PdfViewer = lazy(() => import('../pdf/PdfViewer.jsx'))
 
 const DRAFT_NOTES = {
   noPaper: 'Attach a paper and your draft will appear here.',
@@ -45,6 +49,20 @@ export default function ChatApp() {
     if (r.clear) setText('')
     if (inputRef.current) inputRef.current.focus()
   }, [controller, text])
+
+  // A box dragged on the PDF: the text found there goes into the text box as a quotation. Nothing found: nothing happens.
+  const onSelect = useCallback(async (page, rect) => {
+    const found = await controller.selectRect(page, rect)
+    if (!found) return
+    setText(prev => quoteInto(prev, found))
+    if (inputRef.current) inputRef.current.focus()
+  }, [controller])
+
+  const pane = state.paperId ? (
+    <Suspense fallback={null}>
+      <PdfViewer url={api.pdfUrl(state.paperId)} focus={state.focus} onSelect={onSelect} />
+    </Suspense>
+  ) : null
 
   const selected = useMemo(() => selectedLabels(text, state.menu), [text, state.menu])
 
@@ -95,6 +113,6 @@ export default function ChatApp() {
       onChip={onChip} selected={selected} inputRef={inputRef} dragging={dragging} dragHandlers={dragHandlers}
       draftOpen={draftOpen} onToggleDraft={() => setDraftOpen(o => !o)}
       draft={state.paperId ? draft : { ...draft, sections: [], note: DRAFT_NOTES.noPaper }}
-      onEditItem={onEditItem} onCopy={onCopy} />
+      onEditItem={onEditItem} onCopy={onCopy} pane={pane} onCite={controller.focusCite} />
   )
 }

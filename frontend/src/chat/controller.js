@@ -8,6 +8,8 @@
 // Every backend call goes through `api` (see api.js) and returns { ok, status, data }, so a failure is a value,
 // never an exception. A failure puts ONE plain sentence in the thread; sending again retries.
 
+import { withCites, nextFocus, selectionFocus } from './citeModel.js'
+
 export const COPY = {
   unreachable: "I can't reach the server right now. Send a message to try again.",
   sendFailed: "That didn't go through. Send your message again to retry.",
@@ -52,6 +54,7 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
   let starting = false
   let state = {
     stage: 'boot', messages: [], busy: false, menu: null, draftVersion: 0,
+    spans: {}, focus: null,            // spans by id (page and box), and the one set of spans the PDF is showing
     reviewerId, paperId: storage.get(KEYS.paper) || null,
   }
   const listeners = new Set()
@@ -94,8 +97,19 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
     if (!r.ok || !Array.isArray(r.data)) return
     const turns = r.data
       .filter(t => t.kind === 'chat' && (t.role === 'user' || t.role === 'assistant') && t.text && !(t.meta && t.meta.onboarding))
-      .map(t => ({ id: ++seq, role: t.role, text: t.text }))
+      .map(t => ({ id: ++seq, role: t.role, text: t.text, ...(t.meta && Array.isArray(t.meta.parts) ? { parts: t.meta.parts } : {}) }))
     if (turns.length) patch({ messages: [...turns, ...state.messages] })
+  }
+
+  // Where each span of the paper sits, for the PDF pane. A failure is quiet: replies carry the boxes they cite anyway.
+  async function loadSpans() {
+    if (!state.paperId) return
+    const pid = state.paperId
+    const r = await api.spans(pid)
+    if (state.paperId !== pid || !r || !r.ok || !Array.isArray(r.data)) return
+    const byId = { ...state.spans }
+    for (const s of r.data) if (s && s.id) byId[s.id] = s
+    patch({ spans: byId })
   }
 
   async function start() {
@@ -107,7 +121,7 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
       const r = await api.onboarding(state.reviewerId)
       if (!r.ok || !r.data) { fail(COPY.unreachable); patch({ stage: 'boot' }); return }
       if (r.data.done) {
-        if (state.paperId) { patch({ stage: 'chat', menu: null }); await loadHistory() }
+        if (state.paperId) { patch({ stage: 'chat', menu: null }); await loadHistory(); await loadSpans() }
         else closeOnboarding()
       } else {
         showStep(r.data)
@@ -142,7 +156,10 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
         const o = r.data.onboarding || {}
         patch({ stage: 'onboarding', menu: o.menu && o.menu.length ? o.menu : null })
       }
-      say(r.data.reply)
+      const byId = withCites(state.spans, r.data.cites)
+      say(r.data.reply, Array.isArray(r.data.parts) && r.data.parts.length ? { parts: r.data.parts } : {})
+      // The PDF moves only when the reply cites something it can locate: never for a reply that cites nothing.
+      patch({ spans: byId, focus: nextFocus(state.focus, (r.data.cites || []).map(c => c.id), byId) })
       if (r.data.draft_changed) patch({ draftVersion: state.draftVersion + 1 })
       return { clear: true }
     }
@@ -188,7 +205,8 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
       if (!pid) { fail(COPY.uploadFailed); return }
       const stage = state.stage
       storage.set(KEYS.paper, pid)
-      patch({ paperId: pid })
+      patch({ paperId: pid, spans: {}, focus: null })
+      loadSpans()
       if (stage === 'attach') { patch({ stage: 'chat' }); say(COPY.gotPaper) }
       else if (stage === 'onboarding') say(COPY.gotPaperEarly)
       else { patch({ draftVersion: state.draftVersion + 1 }); say(COPY.switched) }
@@ -197,5 +215,21 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
     }
   }
 
-  return { getState, subscribe, start, send, attach }
+  // The reviewer clicked a pointer in a reply: show its spans again.
+  function focusCite(ids) {
+    const f = nextFocus(state.focus, ids, state.spans)
+    if (f !== state.focus) patch({ focus: f })
+  }
+
+  // The reviewer dragged a box on the PDF. Returns the text found there, or '' (nothing readable: no error, no change).
+  async function selectRect(page, rect) {
+    if (!state.paperId) return ''
+    const r = await api.select(state.paperId, page, rect)
+    const span = r && r.ok && r.data && r.data.kind === 'span' ? r.data.span : null
+    if (!span || !span.text) return ''
+    patch({ focus: selectionFocus(state.focus, span) })
+    return String(span.text)
+  }
+
+  return { getState, subscribe, start, send, attach, focusCite, selectRect }
 }

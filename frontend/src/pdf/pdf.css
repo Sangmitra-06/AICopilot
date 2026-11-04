@@ -1,0 +1,16 @@
+/* The PDF pane of the chat-first screen. Scoped to .pdf-* so it cannot touch the old guided flow's styles (App.css). */
+
+.pdf-scroller { position: relative; height: 100%; overflow: auto; padding: 14px 0; background: #ecebe6; }
+.pdf-page {
+  position: relative; margin: 0 auto 12px; background: #fff; border: 1px solid #dcd9d0; border-radius: 3px;
+  user-select: none; cursor: crosshair;
+}
+.pdf-page canvas { display: block; width: 100%; height: 100%; }
+
+/* One neutral colour for every highlight. It marks where something is, never how good it is. */
+.pdf-hl {
+  position: absolute; pointer-events: none; border-radius: 3px;
+  background: rgba(255, 214, 102, 0.42); outline: 1px solid rgba(196, 150, 20, 0.6);
+}
+.pdf-drag { position: absolute; border: 1.5px dashed #3a56d4; background: rgba(58, 86, 212, 0.1); pointer-events: none; }
+.pdf-pno { position: absolute; right: 8px; top: 5px; font-size: 11px; color: #8a8f9c; pointer-events: none; }

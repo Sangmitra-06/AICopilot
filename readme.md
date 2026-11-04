@@ -145,11 +145,14 @@ Run from the repository root:
 node scripts/e2e/drive.mjs              # the full journey; makes a few real model calls
 node scripts/e2e/drive.mjs --offline    # everything that needs no model (no key needed)
 node scripts/e2e/drive-guided.mjs       # a backend in guided mode shows the old flow (no key needed)
+node scripts/e2e/drive-pdf.mjs          # the PDF pane that follows the conversation (scripted model, no key needed)
 ```
 
 Each check prints `PASS` or `FAIL`, and the script exits 1 if any check fails. If Chrome, the key (full run only), the built frontend or a free port is missing, the script prints `SKIPPED:` with what to fix and exits 0. Screenshots and the backend log go to `scripts/e2e/out/` (git-ignored; set `E2E_OUT` to change it).
 
 The full run checks, among other things: the failure sentence and retry when the backend is down; the onboarding acknowledgements (after a real answer, none after a skip or an off-topic reply); the switch to chat once the paper is attached; that the assistant never claims a capture that did not happen; the draft panel (edit, Copy all); the novice walkthrough and criteria chips; and that `?mode=guided` shows the old flow.
+
+`drive-pdf.mjs` runs the real backend with a scripted model (`scripted_backend.py`) and a four-page test paper on a 1366px-wide window. It checks that the PDF sits on the left after upload and the chat stays usable; that a cited passage is highlighted and scrolled to, with no marker or id in the reply; that replies citing nothing (and gap reports, and ids the paper does not have) leave the PDF where it is; that clicking a pointer brings its highlight back, also after a reload; that dragging a box puts the text in the text box as a quotation; and that the draft panel opens over the chat.
 
 ## Criteria and definitions
 

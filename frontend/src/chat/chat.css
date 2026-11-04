@@ -20,6 +20,23 @@ body { background: var(--ca-bg); color: var(--ca-ink); font-family: var(--ca-fon
 .ca-root { display: flex; height: 100%; background: var(--ca-bg); }
 .ca-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
+/* a pointer in a reply, "(Section 4)": plain text that shows the passage in the PDF when clicked (not a button) */
+.ca-cite { cursor: pointer; border-bottom: 1px dotted var(--ca-muted); }
+.ca-cite:hover { border-bottom-color: var(--ca-accent); color: var(--ca-accent); }
+
+/* after a paper is attached: the PDF on the left, the chat on the right (a laptop screen is about 1366px wide) */
+.ca-pdf { flex: 0 0 46%; min-width: 360px; max-width: 760px; border-right: 1px solid var(--ca-line); }
+.ca-with-pdf { position: relative; }
+.ca-with-pdf .ca-column, .ca-with-pdf .ca-box { max-width: none; }
+.ca-with-pdf .ca-thread { padding: 8px 24px 16px; }
+.ca-with-pdf .ca-composer { padding: 8px 20px 20px; }
+/* the draft panel opens over the chat, under the toggle, so it never squeezes the PDF */
+.ca-with-pdf .ca-panel {
+  position: absolute; top: 52px; right: 0; bottom: 0; width: min(420px, 100% - 360px); z-index: 2;
+  border-top: 1px solid var(--ca-line); box-shadow: -8px 0 24px rgba(29, 33, 41, 0.1);
+}
+.ca-with-pdf .ca-panel-body { padding-top: 20px; }
+
 /* the draft toggle: small, in a slim bar above the thread so it never covers text */
 .ca-bar { flex: none; display: flex; justify-content: flex-end; padding: 14px 20px 0; }
 .ca-toggle {
@@ -93,6 +110,8 @@ body { background: var(--ca-bg); color: var(--ca-ink); font-family: var(--ca-fon
 .ca-copy:hover { background: #2f47b5; }
 
 @media (max-width: 900px) {
+  .ca-pdf { display: none; }                         /* too narrow for two panes: chat only */
+  .ca-with-pdf .ca-panel { top: 0; width: min(420px, 100%); position: fixed; bottom: 0; }
   .ca-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100%); z-index: 3; box-shadow: -8px 0 24px rgba(29, 33, 41, 0.12); }
 }
 @media (max-width: 520px) {
