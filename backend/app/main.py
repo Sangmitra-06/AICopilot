@@ -427,15 +427,25 @@ def run_onboarding(rid, text=None):
         step["profile"] = onboarding.profile_view(st)
         step["error"] = "no_question_pending"
         step["message"] = "No question has been fetched yet. GET /onboarding/{rid} first, then answer the question it returns."
+        step["ack"] = ""
         return step, True
+    ack = ""
     if text is not None:
-        for e in onboarding.process(st, text, onboarding.model_on_topic):
+        answered = onboarding.process(st, text, onboarding.model_on_topic)
+        for e in answered:
             store.log(key, e["type"], e["payload"])
+        outcome = next((e["payload"].get("outcome") for e in answered if e["type"] == "onboarding_answered"), None)
+        if outcome == "answered":
+            # A brief neutral acknowledgement, shown before the next question, only for a real answer: never after a
+            # skip, or an off-topic reply that earned a follow-up. Plain words from a varied pool; it never repeats or
+            # rates what the reviewer said.
+            ack = chatflow.onboarding_ack("answered", text.strip(), False, st["turn"])
         st = store.onboarding(rid)
     evs, step = onboarding.next_step(st, rid)
     for e in evs:
         store.log(key, e["type"], e["payload"])
     step["profile"] = onboarding.profile_view(store.onboarding(rid))
+    step["ack"] = ack
     return step, False
 
 

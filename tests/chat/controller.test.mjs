@@ -81,6 +81,51 @@ test('reloading mid-onboarding shows the pending question once', async () => {
   assert.deepEqual(texts(c), ['a:Q1'])
 })
 
+// ------------------------------------------------------------------ acknowledgements
+
+test('the backend\'s acknowledgement leads the next question, in one message', async () => {
+  const { c } = make({ onboarding: [ok(step('Q1'))], answer: [ok(step('Q2', { ack: 'Got it.' }))] })
+  await c.start()
+  await c.send('7 papers')
+  assert.deepEqual(texts(c), ['a:Q1', 'u:7 papers', 'a:Got it.\n\nQ2'])
+})
+
+test('no acknowledgement, no change: a skip or an off-topic reply shows just the question', async () => {
+  const { c } = make({ onboarding: [ok(step('Q1'))], answer: [ok(step('Q2', { ack: '' })), ok(step('Q3'))] })
+  await c.start()
+  await c.send('idk')
+  await c.send('banana')
+  assert.deepEqual(texts(c), ['a:Q1', 'u:idk', 'a:Q2', 'u:banana', 'a:Q3'])
+})
+
+test('with a walkthrough the acknowledgement leads the walkthrough and the question stays its own message', async () => {
+  const { c } = make({ onboarding: [ok(step('Q1'))],
+    answer: [ok(step('Reading order?', { ack: 'Thanks.', walkthrough: { text: 'The form has 10 parts.' } }))] })
+  await c.start()
+  await c.send('new to me')
+  assert.deepEqual(texts(c).slice(-2), ['a:Thanks.\n\nThe form has 10 parts.', 'a:Reading order?'])
+})
+
+test('the acknowledgement of the last answer leads the request for the paper', async () => {
+  const { c } = make({ onboarding: [ok(step('Q12'))], answer: [ok({ ...DONE, ack: 'Noted.' })] })
+  await c.start()
+  await c.send('x')
+  assert.equal(texts(c).at(-1), 'a:Noted.\n\n' + COPY.askAttach)
+})
+
+test('a 409 shows the current question plainly: the backend sends no acknowledgement with it', async () => {
+  const { c } = make({ onboarding: [ok(step('Q1', { ack: '' }))], answer: [status(409, step('Q1', { ack: '' }))] })
+  await c.start()
+  await c.send('7 papers')
+  assert.deepEqual(texts(c), ['a:Q1', 'a:Q1'])
+})
+
+test('a reload shows the pending question with no acknowledgement', async () => {
+  const { c } = make({ onboarding: [ok(step('Q3', { ack: '' }))] })
+  await c.start()
+  assert.deepEqual(texts(c), ['a:Q3'])
+})
+
 // ------------------------------------------------------------------ the 409 case
 
 test('on a 409 the returned current question is shown and the reply is not recorded', async () => {

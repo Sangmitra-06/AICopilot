@@ -91,7 +91,9 @@ own phrases back; do not map their answers onto a fixed rubric.
   again retries), `api.js`, `draftModel.js`, `flow.js`. Components: Root > ChatApp > ChatView >
   { Thread (Message, Chip), Composer, "Review draft" toggle, DraftPanel > DraftItem }.
   Onboarding uses `/onboarding/*` (no paper yet), then `/chat/{pid}` after upload; the reviewer
-  id and paper id are kept in localStorage.
+  id and paper id are kept in localStorage. `POST /onboarding/{rid}/answer` returns an `ack`
+  (a plain, varied "Got it." / "Thanks.") only after a real answer, never after a skip, an
+  off-topic reply that earned a follow-up, a GET or a 409; the UI shows it before the next question.
 - 19 *_SYS prompts (16 across 8 backend files, plus `onboarding.TOPIC_SYS`,
   `prompts.CHAT_SYS` and `prompts.VIEW_SYS`); each composes the shared NEUTRALITY block from `prompts.py`.
   `prompts.py` is also the one place for the PROFILE block and the chat prompt assembly.
@@ -140,10 +142,10 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: .\.venv\Scripts\python.exe -m pytest (1109 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
+- Python: .\.venv\Scripts\python.exe -m pytest (1149 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
   HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient; tests/conftest.py
   points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
-- Frontend: node --test tests/loops/*.test.mjs tests/chat/*.test.mjs (77 tests: 12 old-flow, 65
+- Frontend: node --test tests/loops/*.test.mjs tests/chat/*.test.mjs (83 tests: 12 old-flow, 71
   chat-first, including a render test that loads the real components through Vite's SSR loader
   and lists every control on screen)
 - Build: npm run build in frontend/

@@ -385,3 +385,22 @@ def test_endpoint_rejects_odd_reviewer_ids(api):
     for bad in ("a b", "x" * 65, "../etc", "a:b"):
         with pytest.raises(HTTPException):
             api.onboarding_step(bad)
+
+
+@pytest.mark.parametrize("skip", ["skip this one", "skip it", "pass on this one", "I'd rather not say, one way or another",
+                                  "prefer not to say", "idk"])
+def test_a_skip_is_never_read_as_a_count_of_papers(skip):
+    assert ob.x_papers(skip, True) is None
+
+
+@pytest.mark.parametrize("said,count", [("none", 0), ("zero", 0), ("no", 0), ("one", 1), ("a dozen or so, mostly workshop papers", 12),
+                                        ("7 papers", 7), ("about 30", 30), ("my first review", 0)])
+def test_real_counts_are_still_read(said, count):
+    assert ob.x_papers(said, True) == count
+
+
+def test_skip_this_one_on_the_first_question_stores_a_default_and_moves_on():
+    s = Session()
+    r = s.say("skip this one")
+    assert s.state()["evidence"]["papers_reviewed"]["value"] is None
+    assert s.state()["evidence"]["papers_reviewed"]["source"] == "default" and r["field"] == "subarea_familiarity"

@@ -72,16 +72,21 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
 
   // Show a backend onboarding step that is not the end: the form walkthrough (novices, once), then the question,
   // with the criteria menu (novices) as chips. `force` shows the question even if it is already the last message.
+  // The backend's brief acknowledgement of the last answer (step.ack, empty after a skip or an off-topic reply) leads
+  // the first message of the step, so the thread reads "Got it." and then the question, in one turn.
+  const lead = (ack, text) => (ack ? `${ack}\n\n${text}` : text)
+
   function showStep(step, force = false) {
-    if (step.walkthrough && step.walkthrough.text) say(step.walkthrough.text)
+    let ack = step.ack || ''
+    if (step.walkthrough && step.walkthrough.text) { say(lead(ack, step.walkthrough.text)); ack = '' }
     const last = lastAssistant()
-    if (force || !last || last.text !== step.question) say(step.question)
+    if (force || !last || last.text !== step.question) say(lead(ack, step.question))
     patch({ stage: 'onboarding', menu: step.menu && step.menu.length ? step.menu : null })
   }
 
-  function closeOnboarding() {
-    if (state.paperId) { patch({ stage: 'chat', menu: null }); say(COPY.readyChat) }
-    else { patch({ stage: 'attach', menu: null }); say(COPY.askAttach) }
+  function closeOnboarding(ack = '') {
+    if (state.paperId) { patch({ stage: 'chat', menu: null }); say(lead(ack, COPY.readyChat)) }
+    else { patch({ stage: 'attach', menu: null }); say(lead(ack, COPY.askAttach)) }
   }
 
   async function loadHistory() {
@@ -117,7 +122,7 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
     const r = await api.answer(state.reviewerId, text)
     if (r.ok && r.data) {
       patch({ menu: null })
-      if (r.data.done) closeOnboarding()
+      if (r.data.done) closeOnboarding(r.data.ack)
       else showStep(r.data)
       return { clear: true }
     }

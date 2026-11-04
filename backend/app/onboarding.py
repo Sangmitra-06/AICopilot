@@ -197,6 +197,8 @@ def x_papers(text, direct):
         m = re.fullmatch(r"\W*(?:about |around |roughly |maybe |like |~)?" + _NUM + r"(?: or so| times)?\W*", t, re.I)
         if m:
             return _num(m.group(1))
+        if is_skip(t) or re.search(r"\b(?:skip|pass|rather not|prefer not)\b", t, re.I):
+            return None                                       # "skip this one" is a skip, not a count of one
         m = re.search(r"\b" + _NUM_IN_TEXT + r"\b", t, re.I)  # "a dozen or so, mostly workshop papers"
         if m and len(t.split()) <= 10:
             return _num(m.group(1))
