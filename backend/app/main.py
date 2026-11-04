@@ -409,7 +409,7 @@ def run_onboarding(rid, text=None):
     key = store.reviewer_key(rid)
     st = store.onboarding(rid)
     if text is not None:
-        for e in onboarding.process(st, text):
+        for e in onboarding.process(st, text, onboarding.model_on_topic):
             store.log(key, e["type"], e["payload"])
         st = store.onboarding(rid)
     evs, step = onboarding.next_step(st, rid)

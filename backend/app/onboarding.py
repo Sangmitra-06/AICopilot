@@ -13,6 +13,7 @@ import random
 import re
 
 from . import criteria
+from .prompts import NEUTRALITY
 
 MAX_TURNS = 14  # reviewer answers, follow-ups included
 
@@ -55,12 +56,14 @@ FOLLOWUPS = {
     "workflow_mode": "Which is closer: reading alone first and coming back, or talking it through as you go?",
     "summary_preference": "Would you want a summary before you read, after you read, or not at all?",
     "note_habit": "Where do your notes end up: annotations in the PDF, a separate document, paper, or your head?",
-    "strength_criteria": "In a sentence or a few words, what would make you call something a strength?",
-    "weakness_criteria": "In a sentence or a few words, what would make you call something a weakness?",
-    "over_under_penalize": "Is there a kind of issue you tend to weigh more or less heavily than others do? A few words is fine.",
-    "hardest_part": "In a few words, what part of writing a review takes you the most effort?",
-    "excellent_review_example": "In a few words, what stood out in a review you thought was excellent?",
-    "bad_review_traits": "In a few words, what makes a review bad to you?",
+    # Free-text follow-ups are only ever sent after an off-topic reply: say so, ask one concrete thing,
+    # and offer the skip.
+    "strength_criteria": "I didn't catch that as an answer. What do you look for in a strength? Or say skip.",
+    "weakness_criteria": "I didn't catch that as an answer. What do you look for in a weakness? Or say skip.",
+    "over_under_penalize": "I didn't catch that as an answer. What kind of issue do you tend to weigh more or less heavily than others do? Or say skip.",
+    "hardest_part": "I didn't catch that as an answer. What part of writing a review takes you the most effort? Or say skip.",
+    "excellent_review_example": "I didn't catch that as an answer. What stood out in a review you thought was excellent? Or say skip.",
+    "bad_review_traits": "I didn't catch that as an answer. What makes a review bad, in your view? Or say skip.",
 }
 OTHER = {"id": "other", "label": "Other, in my words"}
 MENU_EXCLUDE = {"summary", "comments", "strengths", "weaknesses", "overall", "confidence"}  # buckets, not criteria
@@ -90,10 +93,74 @@ def is_skip(text):
     return not rest
 
 
-def unclear_text(text):
-    """A free-text answer that answers nothing: empty, a single word, or a question back."""
+def hard_junk(text):
+    """Replies that are not answers whatever the field: empty, a single word, a question back, or
+    repeated characters ("aaaa", "hahahaha", "?????")."""
     t = (text or "").strip()
-    return len(WORD.findall(t.lower())) < 2 or bool(QUESTIONISH.search(t))
+    letters = re.sub(r"[^a-z0-9]", "", t.lower())
+    return (len(WORD.findall(t.lower())) < 2 or bool(QUESTIONISH.search(t))
+            or len(set(letters)) <= 3 or bool(re.search(r"(.)\1{4,}", t)))
+
+
+# Topical vocabulary for free-text fields: roots shared by all of them, plus a few per field. Sincere but
+# vague answers ("I mostly go with my gut") must pass, so the common list includes how-I-work words.
+# Nothing here judges an answer; it only asks whether the reply is about reviewing at all.
+_COMMON = ("paper claim result experiment baseline method approach novel clear clarity writing written evidence "
+           "data dataset review argument contribution motivat evaluat analys ablat reproduc code theor proof figure "
+           "table section abstract ground support sound rigor thorough depth detail explain compar related prior "
+           "idea insight signif import interest useful solid weak strong flaw gap miss limit confus vague tone "
+           "constructive specific actionable fair balanc feedback author score accept reject decision criteria "
+           "standard bias subjectiv "
+           "gut feel instinct intuit impression mostly usually tend depend generally overall sense hunch vibe seem "
+           "trust think believe matter care bother annoy system process checklist habit routine rule").split()
+_EXTRA = {
+    "hardest_part": "time deadline start structur organi wording harsh confiden length summar decid commit".split(),
+    "over_under_penalize": "typo english language grammar novelty length format notation presentation polish".split(),
+    "bad_review_traits": "short lazy rude generic unfair harsh mean dismiss superficial".split(),
+    "excellent_review_example": "detailed helpful kind thorough specific polite".split(),
+    "strength_criteria": "robust general simple elegant impact".split(),
+    "weakness_criteria": "overclaim unsupported incomplete overstat".split(),
+}
+
+
+def topical(field, text):
+    roots = set(_COMMON) | set(_EXTRA.get(field, ()))
+    return any(w.startswith(r) for w in WORD.findall((text or "").lower()) for r in roots)
+
+
+TOPIC_SYS = """You check one thing about a reply given during a paper reviewer's onboarding: is the reply an attempt to answer the question that was asked?
+""" + NEUTRALITY + """
+Return JSON {"on_topic": bool}.
+on_topic is true when the reply is about the question's subject (reviewing, papers, or how this reviewer works or decides), however vague, short, hesitant, or unusual it is.
+on_topic is false only when the reply is about something else entirely, is nonsense, or is a question back to the assistant.
+Never judge whether the reply is good, correct, complete, or well reasoned."""
+
+
+def model_on_topic(field, text):
+    """Optional yes/no check for replies the rules cannot place. True / False, or None if unavailable."""
+    import json
+    from .llm import _chat  # imported here so the rules above stay usable without a model
+    q = QUESTIONS.get(field, "")
+    raw = _chat([{"role": "system", "content": TOPIC_SYS},
+                 {"role": "user", "content": f"Question asked: {q}\nReply: {text}"}])
+    v = json.loads(raw).get("on_topic")
+    return v if isinstance(v, bool) else None
+
+
+def free_text_ok(field, text, check=None):
+    """Is this reply an attempt at the free-text question? Rules first; `check` only for replies that
+    pass the hard rules but use no vocabulary the rules know. Its failure falls back to the rules."""
+    if hard_junk(text):
+        return False
+    if topical(field, text):
+        return True
+    if check is None:
+        return False
+    try:
+        return check(field, text) is True
+    except Exception as e:
+        print("[onboarding] topic check failed, using rules:", repr(e)[:120])
+        return False
 
 
 # ---------------------------------------------------------------- extraction (rules, no model)
@@ -330,8 +397,10 @@ def _experience_event(st, evs):
                  f"subarea_familiarity={ev.get('subarea_familiarity')}")]
 
 
-def process(st, text):
-    """Apply the reviewer's reply to the pending question. Returns events to log."""
+def process(st, text, check=None):
+    """Apply the reviewer's reply to the pending question. Returns events to log.
+
+    `check(field, text) -> bool|None` is the optional on-topic model check (see free_text_ok)."""
     p = st["pending"]
     if not p or st["closed"]:
         return []
@@ -346,15 +415,17 @@ def process(st, text):
             evs.append(_set(field, DEFAULTS.get(field), "default", text)); outcome = "skipped"
     elif is_skip(text):
         evs.append(_set(field, DEFAULTS[field], "default", text)); outcome = "skipped"
-    elif not unclear_text(text):
-        extra = {}
-        if p.get("menu"):
-            picked = parse_menu(text, p["menu"])
-            if picked:
-                extra["picked"] = picked
-        evs.append(_set(field, text, "answer", text, **extra)); outcome = "answered"
+    else:
+        picked = parse_menu(text, p["menu"]) if p.get("menu") else []  # menu picks are on topic by construction
+        if picked or free_text_ok(field, text, check):
+            evs.append(_set(field, text, "answer", text, **({"picked": picked} if picked else {}))); outcome = "answered"
     if outcome == "unclear" and kind == "followup":
-        evs.append(_set(field, DEFAULTS.get(field), "default", text)); outcome = "defaulted"
+        if field in STRUCTURED:
+            evs.append(_set(field, DEFAULTS.get(field), "default", ""))
+        else:  # second off-topic reply: an empty value, and the junk itself is not kept anywhere
+            evs.append(_set(field, "", "default", "", reason="off_topic"))
+        outcome = "defaulted"
+    kept = "" if outcome in ("unclear", "defaulted") else text  # replies that answered nothing are not logged
     # Extract other fields the reviewer happened to mention. Never overwrite one already set.
     if outcome in ("answered", "unclear", "defaulted") and FIRST_PERSON.search(text) and not is_skip(text):
         taken = {e["payload"].get("field") or e["payload"].get("key") for e in evs}
@@ -365,7 +436,7 @@ def process(st, text):
             if v is not None:
                 evs.append(_set(f, v, "extracted", text))
     evs += _experience_event(st, evs)
-    return [{"type": "onboarding_answered", "payload": {"field": field, "kind": kind, "text": text,
+    return [{"type": "onboarding_answered", "payload": {"field": field, "kind": kind, "text": kept,
                                                           "outcome": outcome, "turn": st["turn"] + 1}}] + evs
 
 

@@ -107,7 +107,7 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: .\.venv\Scripts\python.exe -m pytest (258 tests + 2 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
+- Python: .\.venv\Scripts\python.exe -m pytest (404 tests + 2 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
 - Frontend: node --test tests/loops/*.test.mjs (12 tests)
 - Build: npm run build in frontend/
 - Setup: python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r backend\requirements.txt

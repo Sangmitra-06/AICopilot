@@ -15,8 +15,8 @@ SPEC_FIELDS = ["reading_order", "workflow_mode", "summary_preference", "note_hab
 class Session:
     """A reviewer talking to the backend, with the event log held in a list."""
 
-    def __init__(self, rid="r1"):
-        self.rid, self.evs, self.asked = rid, [], []
+    def __init__(self, rid="r1", check=None):
+        self.rid, self.evs, self.asked, self.check = rid, [], [], check
 
     def state(self):
         return store.fold_onboarding(self.evs)
@@ -34,7 +34,7 @@ class Session:
     def say(self, text):
         if not self.state()["pending"]:
             self.step()  # the client fetched the question before replying
-        self._log(ob.process(self.state(), text))
+        self._log(ob.process(self.state(), text, self.check))
         return self.step()
 
     def run(self, answers, limit=60):
