@@ -114,7 +114,7 @@ def test_menu_picks_by_number_are_on_topic():
     assert s.profile()["fields"]["strength_criteria"]["source"] == "answer"
 
 
-# ------------------------------------------------------------------ the optional model check
+# ------------------------------------------------------------------ the optional model check (reject-only)
 
 class Check:
     def __init__(self, result=None, boom=False):
@@ -127,61 +127,108 @@ class Check:
         return self.result
 
 
-AMBIGUOUS = "pineapple chunks on a margherita are my kind of thing"  # >1 word, no question, no known vocabulary
+OBVIOUS_JUNK = ["the weather is lovely", "my cat is sleeping", "asdf lol", "the weather is lovely today",
+                "my cat is called Bob", "I like pizza", "asdfasdf asdfasdf", "pineapple chunks on a margherita are my kind of thing"]
+RULES_ACCEPT = "Missing ablations on the main component"  # topical vocabulary: the rules accept it
 
 
-def test_model_can_rescue_an_ambiguous_reply():
+@pytest.mark.parametrize("field", FREE)
+@pytest.mark.parametrize("junk", OBVIOUS_JUNK)
+def test_a_model_that_always_says_on_topic_cannot_get_junk_stored(field, junk):
     c = Check(True)
-    s = at("hardest_part", check=c)
-    s.say(AMBIGUOUS)
-    assert c.calls == [("hardest_part", AMBIGUOUS)]
-    assert s.profile()["fields"]["hardest_part"]["value"] == AMBIGUOUS
+    s = at(field, check=c)
+    r = s.say(junk)
+    assert (r["field"], r["kind"]) == (field, "followup")  # still treated as off-topic
+    s.say(junk)
+    assert s.profile()["fields"][field]["value"] == ""
+    assert junk not in everything_stored(s)
+    assert c.calls == []  # the model never even sees what the rules rejected
 
 
-def test_model_saying_no_is_the_same_as_the_rules():
-    s = at("hardest_part", check=Check(False))
-    r = s.say(AMBIGUOUS)
-    assert r["kind"] == "followup" and s.profile()["fields"]["hardest_part"] is None
+@pytest.mark.parametrize("field", FREE)
+def test_vague_sincere_answers_survive_a_model_that_says_on_topic(field):
+    c = Check(True)
+    s = at(field, check=c)
+    s.say("I mostly go with my gut")
+    assert s.profile()["fields"][field]["value"] == "I mostly go with my gut"
+    assert c.calls == [(field, "I mostly go with my gut")]  # the rules accepted it; the model only confirmed
+
+
+@pytest.mark.parametrize("field", FREE)
+def test_the_model_can_reject_a_reply_the_rules_accepted(field):
+    c = Check(False)
+    s = at(field, check=c)
+    r = s.say(RULES_ACCEPT)
+    assert (r["field"], r["kind"]) == (field, "followup") and s.profile()["fields"][field] is None
+    s.say(RULES_ACCEPT)
+    assert s.profile()["fields"][field]["value"] == "" and RULES_ACCEPT not in everything_stored(s)
+
+
+@pytest.mark.parametrize("check", [Check(boom=True), Check(None), Check("yes"), Check(True), Check(0)])
+def test_anything_but_an_explicit_no_keeps_what_the_rules_accepted(check):
+    s = at("weakness_criteria", check=check)
+    s.say(RULES_ACCEPT)
+    assert s.profile()["fields"]["weakness_criteria"]["value"] == RULES_ACCEPT
+    assert len(check.calls) == 1
 
 
 @pytest.mark.parametrize("check", [Check(boom=True), Check(None), Check("yes")])
 def test_a_failing_or_useless_model_check_never_blocks_onboarding(check):
     s = Session(check=check)
-    done = s.run([AMBIGUOUS])
+    done = s.run([RULES_ACCEPT, OBVIOUS_JUNK[0]])
     assert done["done"] and s.state()["turn"] <= ob.MAX_TURNS
-    assert s.profile()["fields"]["hardest_part"]["value"] == ""
-    assert check.calls  # it was consulted, and the flow went on regardless
 
 
-def test_the_model_is_not_consulted_when_the_rules_are_sure():
+def test_the_model_is_asked_once_per_rules_accepted_reply_and_never_for_the_rest():
     c = Check(True)
     s = at("weakness_criteria", check=c)
-    s.say("banana"); s.say("?")  # hard junk, twice
+    s.say("banana"); s.say("?")       # hard junk, twice
     s2 = at("weakness_criteria", check=c)
-    s2.say("Missing ablations on the main component")  # known vocabulary
+    s2.say("skip")                    # a skip
+    s3 = at("hardest_part", check=c)
+    s3.say("the weather is lovely")   # rejected by the vocabulary rule
     assert c.calls == []
+    s4 = at("hardest_part", check=c)
+    s4.say("deciding how much detail to put in")
+    assert len(c.calls) == 1
 
 
-def test_the_model_check_is_not_asked_about_skips():
-    c = Check(True)
-    s = at("weakness_criteria", check=c)
-    s.say("skip")
-    assert c.calls == []
+def test_menu_picks_never_reach_the_model():
+    c = Check(False)
+    s = Session(check=c)
+    s.step(); s.say("0"); s.say("never worked on it")
+    for a in ("abstract", "alone", "after", "pdf"):
+        s.say(a)
+    s.say("1, 3")
+    assert s.profile()["fields"]["strength_criteria"]["source"] == "answer" and c.calls == []
 
 
 def test_real_model_function_returns_the_models_yes_no(monkeypatch):
     monkeypatch.setattr(llm, "_chat", lambda msgs: '{"on_topic": true}')
     assert ob.model_on_topic("hardest_part", "anything") is True
+    monkeypatch.setattr(llm, "_chat", lambda msgs: '{"on_topic": false}')
+    assert ob.model_on_topic("hardest_part", "anything") is False
     monkeypatch.setattr(llm, "_chat", lambda msgs: '{"on_topic": "maybe"}')
     assert ob.model_on_topic("hardest_part", "anything") is None
 
 
-def test_real_model_function_failing_falls_back_to_rules_through_free_text_ok():
+def test_with_the_real_check_and_a_down_model_the_rules_decide_alone():
     # The suite blocks network calls: the real function raises here, as a down model would.
-    assert ob.free_text_ok("hardest_part", AMBIGUOUS, ob.model_on_topic) is False
-    assert ob.free_text_ok("hardest_part", "the writing takes the most effort", ob.model_on_topic) is True
+    for junk in OBVIOUS_JUNK:
+        assert ob.free_text_ok("hardest_part", junk, ob.model_on_topic) is False
+    for ok in ("the writing takes the most effort", "I mostly go with my gut"):
+        assert ob.free_text_ok("hardest_part", ok, ob.model_on_topic) is True
 
 
-def test_the_topic_prompt_carries_the_neutrality_block_and_never_asks_for_quality():
+def test_the_real_check_with_a_model_that_says_on_topic_still_rejects_junk(monkeypatch):
+    monkeypatch.setattr(llm, "_chat", lambda msgs: '{"on_topic": true}')
+    for junk in OBVIOUS_JUNK:
+        assert ob.free_text_ok("hardest_part", junk, ob.model_on_topic) is False
+    assert ob.free_text_ok("hardest_part", "I mostly go with my gut", ob.model_on_topic) is True
+
+
+def test_the_topic_prompt_is_reject_only_neutral_and_never_asks_for_quality():
     assert NEUTRALITY in ob.TOPIC_SYS
+    assert "false ONLY when the reply has no relation to the question" in ob.TOPIC_SYS
+    assert "When in doubt, answer true" in ob.TOPIC_SYS
     assert "Never judge whether the reply is good, correct, complete, or well reasoned" in ob.TOPIC_SYS

@@ -115,8 +115,8 @@ _COMMON = ("paper claim result experiment baseline method approach novel clear c
 _EXTRA = {
     "hardest_part": "time deadline start structur organi wording harsh confiden length summar decid commit".split(),
     "over_under_penalize": "typo english language grammar novelty length format notation presentation polish".split(),
-    "bad_review_traits": "short lazy rude generic unfair harsh mean dismiss superficial".split(),
-    "excellent_review_example": "detailed helpful kind thorough specific polite".split(),
+    "bad_review_traits": "short lazy rude generic unfair harsh dismiss superficial".split(),
+    "excellent_review_example": "detailed helpful thorough specific polite respectful".split(),
     "strength_criteria": "robust general simple elegant impact".split(),
     "weakness_criteria": "overclaim unsupported incomplete overstat".split(),
 }
@@ -127,11 +127,11 @@ def topical(field, text):
     return any(w.startswith(r) for w in WORD.findall((text or "").lower()) for r in roots)
 
 
-TOPIC_SYS = """You check one thing about a reply given during a paper reviewer's onboarding: is the reply an attempt to answer the question that was asked?
+TOPIC_SYS = """You check one thing about a reply given during a paper reviewer's onboarding: does the reply have any relation to the question that was asked?
 """ + NEUTRALITY + """
 Return JSON {"on_topic": bool}.
-on_topic is true when the reply is about the question's subject (reviewing, papers, or how this reviewer works or decides), however vague, short, hesitant, or unusual it is.
-on_topic is false only when the reply is about something else entirely, is nonsense, or is a question back to the assistant.
+on_topic is false ONLY when the reply has no relation to the question: it is about something else entirely, is nonsense, or is a question back to the assistant.
+Any reply that touches the question's subject (reviewing, papers, or how this reviewer works or decides) is on topic, however vague, short, hesitant, or unusual it is. When in doubt, answer true.
 Never judge whether the reply is good, correct, complete, or well reasoned."""
 
 
@@ -147,19 +147,20 @@ def model_on_topic(field, text):
 
 
 def free_text_ok(field, text, check=None):
-    """Is this reply an attempt at the free-text question? Rules first; `check` only for replies that
-    pass the hard rules but use no vocabulary the rules know. Its failure falls back to the rules."""
-    if hard_junk(text):
+    """Is this reply an attempt at the free-text question?
+
+    The rules decide whether a reply can be accepted at all; the model can never overrule a rejection.
+    For a reply the rules accepted, `check` may veto it, and only with an explicit False ("no relation to
+    the question"). None, a non-boolean, or an exception all leave the rules' acceptance in place."""
+    if hard_junk(text) or not topical(field, text):
         return False
-    if topical(field, text):
-        return True
     if check is None:
-        return False
+        return True
     try:
-        return check(field, text) is True
+        return check(field, text) is not False
     except Exception as e:
-        print("[onboarding] topic check failed, using rules:", repr(e)[:120])
-        return False
+        print("[onboarding] topic check failed, keeping the rules' verdict:", repr(e)[:120])
+        return True
 
 
 # ---------------------------------------------------------------- extraction (rules, no model)

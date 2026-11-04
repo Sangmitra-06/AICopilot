@@ -135,11 +135,14 @@ def test_a_down_model_never_blocks_the_flow_over_http(client):
     body = client.get("/onboarding/m").json()
     while body["field"] != "hardest_part":
         body = answer(client, "m", "idk").json()
-    # No vocabulary the rules know, so the on-topic check is consulted; the blocked model call raises.
-    r = answer(client, "m", "pineapple chunks on a margherita are my kind of thing")
-    assert r.status_code == 200
-    assert (r.json()["field"], r.json()["kind"]) == ("hardest_part", "followup")
-    assert answer(client, "m", "skip").status_code == 200
+    # The rules accept this reply, so the on-topic check is consulted; the blocked model call raises.
+    # The rules' verdict stands: the answer is kept and onboarding moves on.
+    r = answer(client, "m", "deciding how much detail to put in")
+    assert r.status_code == 200 and r.json()["field"] != "hardest_part"
+    assert r.json()["profile"]["fields"]["hardest_part"]["value"] == "deciding how much detail to put in"
+    # And what the rules reject stays rejected, with or without a model.
+    r = answer(client, "m", "the weather is lovely")
+    assert r.status_code == 200 and r.json()["kind"] == "followup"
 
 
 # ------------------------------------------------------------------ GET /profile/{rid}
