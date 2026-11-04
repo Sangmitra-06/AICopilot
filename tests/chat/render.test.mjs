@@ -85,7 +85,8 @@ test('a failure, a nudge and a gap list are plain assistant messages, not banner
   const m = html({ state: state({ messages: [
     { id: 1, role: 'assistant', text: 'That didn\'t go through. Send your message again to retry.', kind: 'error' },
     { id: 2, role: 'assistant', text: 'Open items:\n- Required, nothing in it yet: Soundness.' }] }) })
-  assert.equal((m.match(/class="ca-msg ca-assistant"/g) || []).length, 2)
+  assert.equal((m.match(/class="ca-msg ca-assistant(?: ca-fmt)?"/g) || []).length, 2)   // the bulleted one renders as a list
+  assert.match(m, /<ul><li>Required, nothing in it yet: Soundness\.<\/li><\/ul>/)
   assert.deepEqual(buttons(m), ['Review draft', 'Attach paper', 'Send'])
 })
 

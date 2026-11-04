@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { pieces } from './citeModel.js'
+import { Fragment, useEffect, useRef } from 'react'
+import { layout } from './format.js'
 
 // One option of the criteria menu (novices only), or "Other, in my words".
 function Chip({ option, selected, onPick }) {
@@ -21,15 +21,40 @@ function Cite({ text, ids, onCite }) {
   )
 }
 
+// One run of an assistant message: a string (React escapes it, so a reply can never inject markup), bold as <strong>, and
+// a section pointer as the clickable Cite. Runs are slices of the reply text, so a pointer inside bold or a list stays one.
+function Run({ run, onCite }) {
+  const inner = run.cite && onCite ? <Cite text={run.text} ids={run.cite} onCite={onCite} /> : run.text
+  return run.bold ? <strong>{inner}</strong> : inner
+}
+
+function Line({ line, onCite }) {
+  return line.map((r, i) => <Run key={i} run={r} onCite={onCite} />)
+}
+
+function Lines({ lines, onCite }) {
+  return lines.map((l, i) => (
+    <Fragment key={i}>{i > 0 && <br />}<Line line={l} onCite={onCite} /></Fragment>
+  ))
+}
+
+function Block({ block, onCite }) {
+  if (block.kind === 'p') return <p><Lines lines={block.lines} onCite={onCite} /></p>
+  const List = block.kind === 'ol' ? 'ol' : 'ul'
+  return <List>{block.lines.map((l, i) => <li key={i}><Line line={l} onCite={onCite} /></li>)}</List>
+}
+
+// The reviewer's own text is shown exactly as typed. An assistant message gets bold, lists and paragraphs (format.js);
+// a single paragraph keeps the plain <p> it always had.
 function Message({ message, onCite }) {
-  const cls = message.role === 'user' ? 'ca-msg ca-user' : 'ca-msg ca-assistant'
-  const ps = onCite ? pieces(message) : null
-  if (!ps || !ps.some(p => p.cite)) return <p className={cls}>{message.text}</p>
-  return (
-    <p className={cls}>
-      {ps.map((p, i) => (p.cite ? <Cite key={i} text={p.text} ids={p.cite} onCite={onCite} /> : p.text))}
-    </p>
-  )
+  const mine = message.role === 'user'
+  const cls = mine ? 'ca-msg ca-user' : 'ca-msg ca-assistant'
+  const blocks = mine ? [] : layout(message.text, message.parts)
+  if (!blocks.length) return <p className={cls}>{message.text}</p>
+  if (blocks.length === 1 && blocks[0].kind === 'p') {
+    return <p className={cls}><Lines lines={blocks[0].lines} onCite={onCite} /></p>
+  }
+  return <div className={cls + ' ca-fmt'}>{blocks.map((b, i) => <Block key={i} block={b} onCite={onCite} />)}</div>
 }
 
 // The conversation: assistant text on the page, the reviewer's text in a soft bubble. Nudges, gap lists and

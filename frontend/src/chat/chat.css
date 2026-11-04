@@ -51,6 +51,12 @@ body { background: var(--ca-bg); color: var(--ca-ink); font-family: var(--ca-fon
 .ca-column { max-width: 700px; margin: 0 auto; }
 .ca-msg { margin: 0 0 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ca-assistant { max-width: 100%; }
+/* an assistant message with lists or paragraphs: block elements instead of one pre-wrapped line */
+.ca-fmt { white-space: normal; }
+.ca-fmt p { margin: 0 0 10px; }
+.ca-fmt ul, .ca-fmt ol { margin: 0 0 10px; padding-left: 22px; }
+.ca-fmt li { margin: 0 0 4px; }
+.ca-fmt > :last-child { margin-bottom: 0; }
 .ca-user { margin-left: auto; width: fit-content; max-width: 85%; background: var(--ca-accent-tint); padding: 10px 16px; border-radius: 18px; }
 .ca-wait { color: var(--ca-muted); letter-spacing: 0.2em; }
 
