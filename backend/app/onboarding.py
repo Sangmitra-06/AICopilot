@@ -92,12 +92,44 @@ def is_skip(text):
     return not rest
 
 
+# A sincere "nothing to add". In the free-text fields where that can be a real answer (NONE_OK) it is stored as the
+# explicit answer "none" (a real answer: not a skip, not a default). In the other free-text fields a bare "no" is
+# unclear and asked once. Whole replies only: "no baselines in the main table" is an ordinary answer.
+NONE_OK = {"over_under_penalize", "hardest_part", "bad_review_traits"}
+NONE_VALUE = "none"
+_LEAD = re.compile(r"^(?:no|nope|nah|naw|well|um+|uh+|hmm+|honestly|actually|yeah|yep|sorry|oh)\s+")
+_TRAIL = re.compile(r"\s+(?:really|sorry|thanks|thank you|honestly|to be honest|i guess|i think|though|at all|no)$")
+_NOTHING = re.compile(
+    r"(?:no|nope|nah|naw|none|nothing|nobody|no one|no thanks|no thank you|not really|not particularly|not at all|"
+    r"probably not|i guess not|i suppose not|not that i (?:can|could) think of|not that i know(?: of)?|"
+    r"(?:none|nothing) (?:that i (?:know|can think|could think)(?: of)?|really|in particular|comes to mind)|"
+    r"i (?:do not|don't|dont) (?:really )?think so|i (?:do not|don't|dont) think (?:i do|there is|there are any)|"
+    r"i (?:do not|don't|dont) tend to(?: really| do that| do so| anything)?|"
+    r"i (?:do not|don't|dont) (?:really )?(?:have|know of) (?:any|one|anything)|i have none)")
+
+
+def is_nothing(text):
+    """Is the whole reply a sincere "nothing to add" ("none", "none that I know", "nope", "not really", "I don't think
+    so", "I don't tend to", ...)? Filler and a leading "no," are ignored; skips ("idk", "no idea", "no preference",
+    "skip") are not this."""
+    t = " ".join(re.sub(r"[^a-z' ]+", " ", (text or "").lower().replace("’", "'")).split())
+    forms = [t]
+    while True:
+        m = _LEAD.match(t)
+        if not m or m.end() >= len(t):
+            break
+        t = t[m.end():]
+        forms.append(t)
+    forms.append(_TRAIL.sub("", t))
+    return any(_NOTHING.fullmatch(f) for f in forms)
+
+
 def hard_junk(text):
     """Replies that are not answers whatever the field: empty, a single word, a question back, or
     repeated characters ("aaaa", "hahahaha", "?????")."""
     t = (text or "").strip()
     letters = re.sub(r"[^a-z0-9]", "", t.lower())
-    return (len(WORD.findall(t.lower())) < 2 or bool(QUESTIONISH.search(t))
+    return (len(WORD.findall(t.lower())) < 1 or bool(QUESTIONISH.search(t))   # a single word passes only if topical (free_text_ok)
             or len(set(letters)) <= 3 or bool(re.search(r"(.)\1{4,}", t)))
 
 
@@ -108,7 +140,7 @@ _COMMON = ("paper claim result experiment baseline method approach novel clear c
            "data dataset review argument contribution motivat evaluat analys ablat reproduc code theor proof figure "
            "table section abstract ground support sound rigor thorough depth detail explain compar related prior "
            "idea insight signif import interest useful solid weak strong flaw gap miss limit confus vague tone "
-           "constructive specific actionable fair balanc feedback author score accept reject decision criteria "
+           "constructive specific actionable fair balanc feedback author score scor accept reject decision criteria "
            "standard bias subjectiv "
            "gut feel instinct intuit impression mostly usually tend depend generally overall sense hunch vibe seem "
            "trust think believe matter care bother annoy system process checklist habit routine rule").split()
@@ -412,6 +444,10 @@ def process(st, text, check=None):
             evs.append(_set(field, val, "answer", text)); outcome = "answered"
         elif is_skip(text):
             evs.append(_set(field, DEFAULTS.get(field), "default", text)); outcome = "skipped"
+    elif is_nothing(text):
+        if field in NONE_OK:  # a sincere "nothing": a real answer, stored as "none" (not a skip, not a default)
+            evs.append(_set(field, NONE_VALUE, "answer", text)); outcome = "answered"
+        # elsewhere a bare "no" is unclear: left as "unclear", so it is asked once (then defaulted)
     elif is_skip(text):
         evs.append(_set(field, DEFAULTS[field], "default", text)); outcome = "skipped"
     else:
@@ -422,7 +458,7 @@ def process(st, text, check=None):
         if field in STRUCTURED:
             evs.append(_set(field, DEFAULTS.get(field), "default", ""))
         else:  # second off-topic reply: an empty value, and the junk itself is not kept anywhere
-            evs.append(_set(field, "", "default", "", reason="off_topic"))
+            evs.append(_set(field, "", "default", "", reason="no_answer" if is_nothing(text) else "off_topic"))
         outcome = "defaulted"
     kept = "" if outcome in ("unclear", "defaulted") else text  # replies that answered nothing are not logged
     # Extract other fields the reviewer happened to mention. Never overwrite one already set.

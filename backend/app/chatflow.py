@@ -97,6 +97,8 @@ def profile_phrases(view):
         e = (view["fields"] or {}).get(field)
         if not e or e.get("source") not in ("answer", "extracted"):
             continue
+        if field not in onboarding.EXTRACT and str(e.get("value") or "").strip().lower() == onboarding.NONE_VALUE:
+            continue  # an explicit "none" is not a phrase of theirs to reflect back
         raw = (e.get("raw") or "").strip()
         if field in onboarding.EXTRACT and e.get("source") == "extracted":
             raw = next((s.strip() for s in re.split(r"(?<=[.!?])\s+", raw)
