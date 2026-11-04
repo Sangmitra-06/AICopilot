@@ -142,13 +142,38 @@ own phrases back; do not map their answers onto a fixed rubric.
 - The paper-conflict check is a non-blocking, neutrally worded flag.
 
 ## Test commands
-- Python: .\.venv\Scripts\python.exe -m pytest (1149 tests + 8 `live` tests skipped unless RUN_LIVE=1; any other live model call must fail loudly)
-  HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient; tests/conftest.py
-  points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
-- Frontend: node --test tests/loops/*.test.mjs tests/chat/*.test.mjs (105 tests: 12 old-flow, 93
-  chat-first, including a render test that loads the real components through Vite's SSR loader
-  and lists every control on screen)
-- Build: npm run build in frontend/
+Run everything from the repository root (C:\dev\ReviewerAISlop). Counts are what each command
+reports today; update them when they change.
+
+1. **Python** (all backend tests, including the old-flow Python loop tests):
+   `.\.venv\Scripts\python.exe -m pytest`
+   -> 1149 passed, 8 skipped (1157 collected: tests/neutrality 696, tests/onboarding 418,
+   tests/loops 43). The 8 skipped are the `live` tests (item 5); any other live model call must
+   fail loudly. HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
+   tests/conftest.py points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
+2. **Old-flow loop tests** (node):
+   `node --test tests/loops/*.test.mjs`
+   -> 12 tests.
+3. **Chat-first frontend tests** (node):
+   `node --test tests/chat/*.test.mjs`
+   -> 93 tests: controller, API client, draft model, flow switch, criteria chips, the browser
+   scripts' skip logic, and a render test that loads the real components through Vite's SSR
+   loader and lists every control on screen.
+   Both node suites together: `node --test tests/loops/*.test.mjs tests/chat/*.test.mjs` -> 105.
+4. **Frontend build** (run in frontend/): `npm run build`. Optional lint of the chat code, also
+   in frontend/: `npx oxlint src/chat src/main.jsx` (should print nothing).
+5. **Live-model tests** (not in the default run; real model calls with the real key):
+   put the real OPENROUTER_API_KEY and MODEL from backend/.env into the environment first
+   (tests/conftest.py otherwise gives them dummy values), then
+   `$env:RUN_LIVE = "1"; .\.venv\Scripts\python.exe -m pytest -m live`
+   -> 8 tests.
+6. **Browser end-to-end check** (not in the default run; needs Chrome and a built frontend):
+   `node scripts/e2e/drive.mjs` (full journey; a few real model calls, needs the key in
+   backend/.env), `node scripts/e2e/drive.mjs --offline` (no model, no key),
+   `node scripts/e2e/drive-guided.mjs` (old flow shown by a guided-mode backend).
+   They print PASS/FAIL per check, exit 1 on a failure, and skip (exit 0) with a reason if
+   Chrome, the key or the built frontend is missing. See "End-to-end browser check" in readme.md.
+
 - Setup: python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r backend\requirements.txt
 - Project lives at C:\dev\ReviewerAISlop (outside OneDrive; OneDrive breaks SQLite and node_modules)
 
