@@ -173,6 +173,23 @@ def onboarding(reviewer):
     return fold_onboarding(events(reviewer_key(reviewer)))
 
 
+def chat_check_stats(paper):
+    """How often the neutrality checks rejected a chat reply for this paper, from the chat_check events."""
+    replies = rejected = regenerated = fallbacks = 0
+    for e in events(paper):
+        if e["type"] != "chat_check":
+            continue
+        p = e["payload"]
+        replies += 1
+        if p.get("fallback"):
+            fallbacks += 1; rejected += 1
+        elif p.get("attempts", 1) > 1:
+            regenerated += 1; rejected += 1
+    return {"replies": replies, "rejected_first_try": rejected, "regenerated_ok": regenerated, "fallbacks": fallbacks,
+            "reject_rate": round(rejected / replies, 3) if replies else 0.0,
+            "fallback_rate": round(fallbacks / replies, 3) if replies else 0.0}
+
+
 def facts(paper):
     out = {}
     for e in events(paper):

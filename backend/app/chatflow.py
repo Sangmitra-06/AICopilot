@@ -8,16 +8,15 @@ import json
 import logging
 import re
 
-from . import store, onboarding, synth
-from .llm import _chat
+from . import store, onboarding, synth, chat_checks
+from .llm import _chat, JUDGE
 from .prompts import build_chat_system, build_chat_messages
 
 log = logging.getLogger("copilot.chat")
 
 HISTORY_TURNS = 20
 PAPER_CHAR_CAP = 240_000  # about 60k tokens; References are always left out first
-FALLBACK = ("I couldn't put together a reply I'm happy with just now. Tell me where you'd like to go next: "
-            "a part of the paper, or a part of your review.")
+FALLBACK = chat_checks.FALLBACK
 
 
 # ------------------------------------------------------------------ what goes into the prompt
@@ -103,23 +102,47 @@ def turn(pid, rid, message, spans):
     if not ob["closed"]:
         return onboarding_turn(pid, rid, message, ob)
     view = onboarding.profile_view(ob)
-    system = build_chat_system(profile_phrases(view), summary_preference(view),
-                               paper_text(spans), draft_text(pid))
-    msgs = build_chat_messages(system, history_turns(pid), message)
-    reply = generate(msgs)
+    phrases, hist = profile_phrases(view), history_turns(pid)
+    wants_decline = bool(JUDGE.search(message))
+    notes = [chat_checks.DECLINE_NOTE] if wants_decline else []
+    system = build_chat_system(phrases, summary_preference(view), paper_text(spans), draft_text(pid), notes)
+    ctx = {"reviewer_text": " ".join([h["text"] for h in hist if h["role"] == "user"] + [message]
+                                     + list(phrases.values())),
+           "wants_decline": wants_decline, "summary_pref": summary_preference(view),
+           "summary_requested": bool(chat_checks.SUMMARY_REQ.search(message))}
+    reply, info = generate_checked(build_chat_messages(system, hist, message), ctx, phrases)
+    chat_checks.record(pid, store, info)
     log_chat(pid, "user", message)
-    log_chat(pid, "assistant", reply)
-    return {"mode": "chat", "reply": reply}
+    log_chat(pid, "assistant", reply, declined=wants_decline or bool(chat_checks.DECLINE_MARK.search(reply[:200])))
+    return {"mode": "chat", "reply": reply, "checks": {"attempts": info["attempts"], "fallback": info["fallback"]}}
 
 
-def generate(msgs):
-    """One model call. A reply that is not usable JSON with a non-empty "reply" becomes the fallback."""
-    try:
-        reply = str(json.loads(_chat(msgs)).get("reply") or "").strip()
-    except Exception as e:
-        log.warning("chat model call failed: %r", e)
-        reply = ""
-    return reply or FALLBACK
+def call_model(msgs):
+    """One model call -> (parsed reply text, raw output). Raises ValueError if the output is not usable."""
+    raw = _chat(msgs)
+    reply = str(json.loads(raw).get("reply") or "").strip()
+    if not reply:
+        raise ValueError("no reply in the model output")
+    return reply, raw
+
+
+def generate_checked(msgs, ctx, phrases):
+    """Every reply passes chat_checks.reply_errors. On failure: regenerate once, then a short neutral fallback.
+    Returns (reply, info) where info feeds the chat_check log."""
+    errs, raw = [], ""
+    for attempt in (1, 2):
+        try:
+            reply, raw = call_model(msgs)
+            errs = chat_checks.reply_errors(reply, ctx)
+        except Exception as e:  # a down or garbling model is a failed attempt, never a 500
+            log.warning("chat model call failed: %r", e)
+            reply, errs = "", ["the model call failed or returned unusable output"]
+        if not errs:
+            return reply, {"attempts": attempt, "fallback": False, "errors": []}
+        msgs = msgs + [{"role": "assistant", "content": raw or "{}"},
+                       {"role": "user", "content": chat_checks.correction(errs)}]
+    fallback = chat_checks.decline_fallback(phrases) if ctx.get("wants_decline") else chat_checks.FALLBACK
+    return fallback, {"attempts": 2, "fallback": True, "errors": errs}
 
 
 def onboarding_turn(pid, rid, message, st):

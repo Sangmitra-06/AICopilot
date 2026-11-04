@@ -103,7 +103,8 @@ def test_chat_returns_a_free_form_reply_built_from_profile_paper_and_draft(chat_
     make_reviewer("rev", **{k: v for k, v in PHRASES.items() if k != "summary_preference"},
                   summary_preference="only after I have read it", summary_preference__value="after_reading")
     r = post(c, "what datasets do they use?")
-    assert r.status_code == 200 and r.json() == {"mode": "chat", "reply": "Section 4 reports accuracy on SST-2 and CoLA."}
+    body = r.json()
+    assert r.status_code == 200 and (body["mode"], body["reply"]) == ("chat", "Section 4 reports accuracy on SST-2 and CoLA.")
     sysmsg = model.system
     assert NEUTRALITY in sysmsg
     for phrase in ("claims that the experiments actually back up", "results reported without variance"):
@@ -168,7 +169,8 @@ def test_a_whole_onboarding_then_chat_in_one_thread(chat_env):
             break
         body = post(c, "idk", rid="idk").json()
     assert body["mode"] == "onboarding" and body["onboarding"]["done"]
-    assert post(c, "where do they define the metric?", rid="idk").json() == {"mode": "chat", "reply": "Here you go."}
+    body = post(c, "where do they define the metric?", rid="idk").json()
+    assert (body["mode"], body["reply"]) == ("chat", "Here you go.")
     assert len(model.calls) == 1
 
 
