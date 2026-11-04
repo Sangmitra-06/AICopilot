@@ -1,6 +1,7 @@
 import hashlib, json, os, re
 from . import criteria, guide
 from .llm import _chat
+from .prompts import NEUTRALITY
 
 OPEN_CACHE = {}
 
@@ -54,7 +55,8 @@ def exhausted(why):
     return {"done": True, "question": "", "source": "exhausted", "why": why}
 
 PROMPT_SYS = """You help a paper reviewer think about one part of the review form by asking ONE short question.
-The question comes from the venue's own definition of that part (given below) and from what the reviewer has already said. You never judge the paper, never say whether anything is good or bad, and never steer the reviewer toward a conclusion.
+The question comes from the venue's own definition of that part (given below) and from what the reviewer has already said. You never steer the reviewer toward a conclusion.
+""" + NEUTRALITY + """
 Rules for the question:
 - It starts with What, How, Where, or Which.
 - It is one sentence, under 25 words, and ends with a question mark.
@@ -67,11 +69,13 @@ Rules for the question:
 Return JSON {"question": str}."""
 
 JUDGE_SYS = """You audit a question an assistant wants to ask a paper reviewer about one part of a review form.
+""" + NEUTRALITY + """
 Return JSON {"leading": bool, "new_topic": bool, "reason": str}.
 leading: the question presupposes a specific verdict or problem about THIS paper (for example "why is the baseline weak?"), nudges toward a particular answer, or asks the reviewer to reinterpret their own earlier remark as a strength, weakness, or concern. A question that simply asks what the reviewer thinks about the part, or what led them to a view, using the venue's own wording, is NOT leading.
 new_topic: the question raises a concern, comparison, or fact about the paper that appears in neither the venue's definition nor the reviewer's words, or it introduces a concept the reviewer did not use (for example "how does it bear on the paper's claims")."""
 
 EXPLAIN_SYS = """You explain, in plain words, what one part of a paper-review form is asking the reviewer to provide. Use only the venue's definition given below.
+""" + NEUTRALITY + """
 Rules: two or three short sentences. Say what the form asks for. Do not mention or judge any particular paper, do not give examples about one, do not say what a good answer would be, and never suggest a score, a verdict, or a point to make.
 Return JSON {"text": str}."""
 

@@ -3,6 +3,7 @@ from . import store, pointers, brief as brief_mod
 from .llm import _chat, ctx
 from .verify import BANNED, NUM, norm
 from .ingest import locate
+from .prompts import NEUTRALITY
 
 GROUPS = ["Claims in the abstract", "What they did", "Headline results"]
 EXTRA = re.compile(r"\b(only|just|merely|limited|impressive|surprising|enough)\b", re.I)
@@ -12,7 +13,8 @@ GENERIC = {"paper", "author", "work", "study", "seem", "think", "feel", "like", 
            "large", "enough", "follow", "some", "also", "they", "their", "this", "that", "them", "will", "would",
            "could", "should", "just", "only", "more", "most", "any", "all", "and", "the"}
 
-BEAR_SYS = """You show a paper reviewer facts from the paper that relate to something they just said. You never judge the paper or the reviewer's view.
+BEAR_SYS = """You show a paper reviewer facts from the paper that relate to something they just said.
+""" + NEUTRALITY + """
 Return JSON {"facts":[{"span_id":str,"quote":str,"says":str}]}.
 Rules:
 1. Use ONLY the spans provided. quote is copied exactly from the span (under 25 words). span_id is the id in the brackets, nothing else.
@@ -87,7 +89,8 @@ def bear(pid, spans, cname, text):
     return out
 
 
-PLAN_SYS = """You decide how an assistant should respond to something a paper reviewer just wrote about one part of a review form. You never judge the paper, never say whether the reviewer is right, and never decide whether their point is good or enough. You only look at what KIND of thing they said.
+PLAN_SYS = """You decide how an assistant should respond to something a paper reviewer just wrote about one part of a review form. You only look at what KIND of thing they said.
+""" + NEUTRALITY + """
 Return JSON {"move": "facts"|"walk"|"followup"|"none", "sections": [int]}.
 facts: the reviewer's point concerns a specific, checkable thing in the paper: a number, method, dataset, model, metric, claim, or result. The assistant will then show what the paper states about it.
 walk: the reviewer says something is hard to follow, unclear, confusing, or that they did not understand some part. The assistant will offer to walk through part of the paper. In "sections", list up to 3 numbers from the section list that the reviewer's words point to (for example they mention the abstract or the method). If their words do not point to a section, return an empty list.

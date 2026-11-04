@@ -2,6 +2,7 @@ import re, json
 from .llm import _chat, ctx
 from .verify import BANNED, norm
 from .ingest import locate
+from .prompts import NEUTRALITY
 
 STOP = set("the a an of to and or in on for with is are was were that this it as by be at from we they their not no never why how what which".split())
 BAD = re.compile(r"\b(address(es|ed)?|resolv\w*|fix(es|ed)?|enough|sufficient\w*|adequate\w*|you should|you must)\b", re.I)
@@ -29,7 +30,9 @@ def retrieve(note, spans, k=8):
     return [s for _, s in scored[:k]]
 
 
-POINT_SYS = """A reviewer wrote a note about a paper. Using ONLY the spans provided, find places where the
+POINT_SYS = """A reviewer wrote a note about a paper.
+""" + NEUTRALITY + """
+Using ONLY the spans provided, find places where the
 paper directly bears on a FACTUAL statement or an open question in the note. Two kinds:
 - "contradicts": the note states what the paper says or did, and a span says something different.
 - "answers": the note says something is missing, unexplained, or unreported, and a span reports it.

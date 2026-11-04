@@ -1,6 +1,7 @@
 import re, json
 from .llm import _chat, ctx
 from .verify import BANNED, NUM, norm
+from .prompts import NEUTRALITY
 
 BANK = {
     "source": "What in the paper led you there?",
@@ -10,8 +11,9 @@ BANK = {
     "open_item": "What would you want to ask the authors about this?",
 }
 
-GUIDE_SYS = f"""You help a paper reviewer think by asking ONE short question about something they flagged.
-You never judge the paper and never steer the reviewer toward a conclusion.
+GUIDE_SYS = """You help a paper reviewer think by asking ONE short question about something they flagged.
+You never steer the reviewer toward a conclusion.
+""" + NEUTRALITY + f"""
 
 A good question is:
 - OPEN: it cannot be answered yes/no, and it does not offer the reviewer options to pick from.
@@ -32,6 +34,7 @@ Bad questions (never write these):
 Return JSON: {{"question": str, "type": "source"|"comparison"|"weight"|"expectation"|"open_item"|"other"}}"""
 
 JUDGE_SYS = """You audit a question an assistant wants to ask a paper reviewer.
+""" + NEUTRALITY + """
 Return JSON {"leading": bool, "new_topic": bool, "valence_neutral": bool, "reason": str}.
 leading: presupposes a problem or verdict, or nudges toward a particular answer.
 new_topic: raises a concern, comparison, or fact that appears in neither the reviewer's note nor the passage.

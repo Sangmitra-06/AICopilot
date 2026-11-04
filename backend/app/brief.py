@@ -2,12 +2,14 @@ import re, json
 from .llm import _chat, ctx
 from .verify import BANNED, NUM, norm
 from .ingest import locate
+from .prompts import NEUTRALITY
 
 GROUPS = ["Claims in the abstract", "What they did", "Contributions they list",
           "Headline results", "Limitations they state"]
 PICK = re.compile(r"abstract|introduction|conclusion|limitation", re.I)
 
-BRIEF_SYS = """You build a short brief of a paper from the authors' OWN emphasis. You never judge the paper and never decide what matters: you only surface what the authors themselves state.
+BRIEF_SYS = """You build a short brief of a paper from the authors' OWN emphasis. You never decide what matters: you only surface what the authors themselves state.
+""" + NEUTRALITY + """
 Return JSON {"groups":[{"title":str,"items":[{"text":str,"span_id":str,"quote":str}]}]} using exactly these group titles, in this order: {GROUPS}
 Rules:
 1. Every item restates something the authors explicitly state, phrased as "The authors say / report / introduce ...". It is the authors' framing, labeled as theirs.

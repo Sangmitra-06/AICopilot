@@ -1,6 +1,7 @@
 import json, re
 from . import criteria
 from .llm import _chat
+from .prompts import NEUTRALITY
 
 DONE = re.compile(r"^\s*(nothing( else| more)?( to add)?|none|that'?s (all|it)( for (now|this))?|i'?m (done|good|finished)|done|"
                   r"no more|enough|all good|move on|next( part)?|skip( this| it)?|pass|no comment)\W*$", re.I)
@@ -25,6 +26,7 @@ def bare(stage, polarity):
     return BARE.get((stage, polarity), "unclear")
 
 INTENT_SYS = """You label one message from a paper reviewer who is being asked questions about one part of a review form.
+""" + NEUTRALITY + """
 Return JSON {"intent": "answer"|"done"|"dontknow"|"question"|"goto"|"other", "goto": str|null}.
 answer: the reviewer states their own view, description, or point for this part (even if short or hedged).
 done: nothing more to add, wants to move on, or has no comment.
@@ -34,7 +36,7 @@ goto: wants to talk about a different part of the form. Put that part's id in "g
 other: anything else (greetings, thanks, off-topic).
 You are given the assistant's last question and the stage of the conversation. Read the message in that context.
 If a message mixes a view with a question or with a refusal (for example "no, I think it is fine"), label it answer, because the view should be saved.
-Never judge whether an answer is good, complete, or enough. Only say what the reviewer is doing with the message."""
+Only say what the reviewer is doing with the message."""
 
 
 def lookup():

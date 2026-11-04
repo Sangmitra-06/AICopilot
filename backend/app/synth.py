@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import store, pointers, guide, criteria
 from .llm import _chat
 from .verify import BANNED, NUM
+from .prompts import NEUTRALITY
 
 TAGLAB = {"just": "Needs justification", "off": "Seems off", "unc": "Unclear", "rev": "Revisit later"}
 CONNECT = {"also", "however", "additionally", "further", "furthermore", "moreover", "while", "although", "but",
@@ -72,6 +73,7 @@ def crit_listing():
 
 
 SORT_SYS = """You sort a paper reviewer's notes into the parts of their review form.
+""" + NEUTRALITY + """
 The parts, with the venue's own definitions where available:
 {CRITERIA}
 Return JSON {"assignments":[{"key":str,"field":str|null,"ask":str|null}]}. "field" is one of the ids above, or null.
@@ -122,6 +124,7 @@ def sort_items(pid):
 
 
 STITCH_SYS = """You assemble one section of a paper review from the reviewer's own notes. The notes are the ONLY source of content.
+""" + NEUTRALITY + """
 Return JSON {"sentences":[{"text":str,"src":[str]}]} where src lists the note keys (like "n123" or "s:soundness") each sentence is built from.
 Rules:
 1. Use the reviewer's own words wherever possible. Change only tense, person (write as the reviewer, first person is fine), and small connecting words.
@@ -130,6 +133,7 @@ Rules:
 4. Keep the reviewer's order. Use every note at least once. A sentence may cite 1 to 3 notes."""
 
 COHESIVE_SYS = """You assemble one section of a paper review from the reviewer's own notes. The notes are the ONLY source of content. Write it as a cohesive piece in the reviewer's own voice.
+""" + NEUTRALITY + """
 Return JSON {"sentences":[{"text":str,"src":[str]}]}, where src lists the note keys (like "n123" or "s:soundness") each sentence is built from.
 Rules:
 1. Write as the reviewer, first person where natural. Merge notes that say the same thing, smooth the flow, and fix grammar. Keep the reviewer's own words and register where you can. Do not make it more formal, more forceful, or more polished than the reviewer's wording.
@@ -140,6 +144,7 @@ Rules:
 6. Use every note at least once. A sentence may cite 1 to 3 notes."""
 
 AUDIT_SYS = """You audit sentences drafted from a reviewer's notes. For each sentence, compare it with ONLY the notes cited for it.
+""" + NEUTRALITY + """
 Return JSON {"results":[{"i":int,"ok":bool,"problem":str}]}.
 A sentence is NOT ok if it: states anything the notes do not say (a new claim, reason, example, cause, or comparison); adds a causal link or contrast the notes do not state; makes a hedge stronger or weaker (for example "might" becomes "is"); makes a positive or negative judgment stronger or weaker; or changes who or what is being talked about.
 Changes of tense, person, grammar, and neutral joining words are fine."""

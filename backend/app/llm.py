@@ -3,6 +3,7 @@ import pymupdf
 from dotenv import load_dotenv
 from openai import OpenAI
 from .schemas import Explanation
+from .prompts import NEUTRALITY
 from .verify import verify, norm
 from .ingest import locate, add_span, page_plain, norm as inorm
 
@@ -12,7 +13,8 @@ MODEL = os.environ["MODEL"]
 USE_PDF = os.environ.get("USE_PDF", "1") == "1"
 IMG = {}
 
-EXPLAIN_SYS = """You explain a research paper to a reviewer. You never judge it.
+EXPLAIN_SYS = """You explain a research paper to a reviewer.
+""" + NEUTRALITY + """
 You get the paper's text as labeled spans, and also images of its pages.
 Return JSON: {"sentences":[{"text":str,"kind":"paper"|"authors_claim"|"background","source":"text"|"pdf"|"image","span_ids":[str],"quote":str|null,"page":int|null}]}
 Rules:
@@ -167,7 +169,9 @@ def look(question, spans, extra, page):
     return _run(user, spans, None, extra=[("[selected area]", extra)])
 
 
-CHECK_SYS = """A reviewer wrote what they understood about part of a paper. Compare ONLY factual claims
+CHECK_SYS = """A reviewer wrote what they understood about part of a paper.
+""" + NEUTRALITY + """
+Compare ONLY factual claims
 about what the paper states or did (numbers, datasets, methods, what was compared). Ignore opinions,
 emphasis, wording, and evaluations. Return {"mismatches":[{"claim":str,"span_id":str,"paper_quote":str,"why":str}]}.
 paper_quote must be copied exactly from the span. If nothing contradicts the paper, return {"mismatches":[]}."""
