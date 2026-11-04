@@ -46,7 +46,7 @@ try {
 
   // 2. attach: PDF on the left, chat on the right
   await b.attach(pdf)
-  await b.waitMsg('Got the paper', 60000)
+  await b.waitPaper()
   await until(() => ev(`document.querySelectorAll('.pdf-page').length === 4`), 20000, 'four pages of the PDF')
   await until(() => ev(`[...document.querySelectorAll('.pdf-page canvas')].some(c => c.width > 0)`), 20000, 'a page to be drawn')
   const lay = await ev(`(() => { const r = s => document.querySelector(s).getBoundingClientRect(); const p = r('.ca-pdf'), m = r('.ca-main'); return { pdfL: p.left, pdfR: p.right, mainL: m.left, mainR: m.right, w: innerWidth } })()`)
@@ -55,12 +55,15 @@ try {
   const fit = await ev(`(() => { const s = document.querySelector('.pdf-scroller'); const p = document.querySelector('.pdf-page').getBoundingClientRect(); return { sw: s.scrollWidth, cw: s.clientWidth, pageW: Math.round(p.width) } })()`)
   t.check(fit.sw <= fit.cw, 'the PDF fits the pane with no sideways scroll', JSON.stringify(fit))
   t.check(JSON.stringify(await b.buttons()) === JSON.stringify(BASE), 'no new buttons or toggles: only Review draft, Attach paper and Send', JSON.stringify(await b.buttons()))
-  t.check((await hls()).length === 0, 'nothing is highlighted before a reply cites something')
+  await settle()
+  const base = await hls()                      // the opening points at the first section of the reading order: that is all
+  const top0 = await scrollTop()
+  t.check(base.length >= 1 && base.length <= 3, 'only what the opening points at is highlighted (the first section, at most three passages)', JSON.stringify(base))
   await b.shot('p02_attached_laptop')
 
   // 3. a reply that cites nothing does not move the PDF
   await b.say('hello there')
-  t.check((await scrollTop()) === 0 && (await hls()).length === 0, 'a reply that cites nothing leaves the PDF where it was, with no highlight')
+  t.check((await scrollTop()) === top0 && (await hls()).length === base.length, 'a reply that cites nothing leaves the PDF where it was, with the same highlight')
 
   // 4. a reply that cites a passage: pointer text, scroll to it, one highlight
   const reply = (await b.say('where do they report accuracy?')).at(-1).text
@@ -74,7 +77,7 @@ try {
   t.check(vis, 'the highlighted passage is inside the visible part of the pane')
   const colour = await ev(`getComputedStyle(document.querySelector('.pdf-hl')).backgroundColor`)
   t.check(/rgba\(255, 214, 102/.test(colour), 'the highlight is the one neutral colour', colour)
-  const cite = await ev(`(() => { const c = document.querySelector('.ca-cite'); return c ? { tag: c.tagName, text: c.textContent, cursor: getComputedStyle(c).cursor, bg: getComputedStyle(c).backgroundColor } : null })()`)
+  const cite = await ev(`(() => { const c = [...document.querySelectorAll('.ca-cite')].find(x => x.textContent === '(Section 3)'); return c ? { tag: c.tagName, text: c.textContent, cursor: getComputedStyle(c).cursor, bg: getComputedStyle(c).backgroundColor } : null })()`)
   t.check(cite && cite.tag === 'SPAN' && cite.text === '(Section 3)', 'the pointer in the reply is plain text (a span, not a button)', JSON.stringify(cite))
   await b.shot('p03_cited_scrolled')
 
@@ -92,7 +95,7 @@ try {
   await ev(`document.querySelector('.pdf-scroller').scrollTo({ top: 0 })`)
   await settle()
   t.check((await scrollTop()) === 0, 'scrolled back to the top by hand')
-  await ev(`[...document.querySelectorAll('.ca-cite')].at(0).click()`)
+  await ev(`[...document.querySelectorAll('.ca-cite')].find(x => x.textContent === '(Section 3)').click()`)
   await settle()
   const top2 = await scrollTop()
   t.check(Math.abs(top2 - top1) < 4 && (await hls()).length === 1, 'clicking the pointer in a reply scrolls back to its highlight', `${top2} vs ${top1}`)

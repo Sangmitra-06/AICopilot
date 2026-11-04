@@ -219,8 +219,12 @@ export async function openBrowser(chromePath, tmp, { width = 1280, height = 860 
     const r = await cdp.send('Page.captureScreenshot', { format: 'png' })
     fs.writeFileSync(path.join(OUT, name + '.png'), Buffer.from(r.data, 'base64'))
   }
-  const msgs = () => cdp.eval(`[...document.querySelectorAll('.ca-msg')].map(e => ({ who: e.classList.contains('ca-user') ? 'user' : 'assistant', text: e.textContent }))`)
+  const msgs = () => cdp.eval(`[...document.querySelectorAll('.ca-msg')].map(e => ({ who: e.classList.contains('ca-user') ? 'user' : 'assistant', text: e.innerText }))`)
   const buttons = () => cdp.eval(`[...document.querySelectorAll('button')].map(b => b.getAttribute('aria-label') || b.textContent.trim())`)
+  // The paper is attached and the app has spoken: its opening (the first section in the reviewer's reading order, after an
+  // optional summary), or the stock line when there is nothing to open with.
+  const OPENED = /Got the paper|start of the paper|as you said you like to/
+  const waitPaper = (ms = 60000) => until(async () => (await msgs()).some(m => OPENED.test(m.text)), ms, 'the opening message after the paper was attached')
   const waitMsg = (sub, ms = 20000) => until(async () => (await msgs()).some(m => m.text.includes(sub)), ms, `a message containing "${sub}"`)
   const idle = () => until(async () => !(await cdp.eval(`!!document.querySelector('.ca-wait')`)), 90000, 'the working mark to go away')
   async function type(text) {
@@ -244,7 +248,7 @@ export async function openBrowser(chromePath, tmp, { width = 1280, height = 860 
     const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'input[type=file]' })
     await cdp.send('DOM.setFileInputFiles', { files: [file], nodeId })
   }
-  return { cdp, resize, shot, msgs, buttons, waitMsg, idle, type, say, goto, attach }
+  return { cdp, resize, shot, msgs, buttons, waitMsg, waitPaper, idle, type, say, goto, attach }
 }
 
 // ------------------------------------------------------------------ checks with a pass/fail summary

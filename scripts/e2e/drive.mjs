@@ -63,7 +63,7 @@ try {
 
   // 4. attach through the paperclip's file input
   await b.attach(pdf)
-  await b.waitMsg('Got the paper', 60000)
+  await b.waitPaper()
   t.check(true, 'the paper was uploaded and the thread switched to chat')
   await b.shot('04_paper_attached')
 

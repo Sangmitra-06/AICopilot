@@ -141,6 +141,32 @@ own phrases back; do not map their answers onto a fixed rubric.
   another section re-targets and writes the note, "no" rejects, a question goes to the model. "What's missing?" and "draft
   it" (broad wording in `chatflow.GAP_REQ2/DRAFT_REQ2`, plus a model reply that only promises a list or draft) are answered
   by the app: the open-section list, and the draft text grouped by section, in the reply itself.
+- Guided walk (`walk.py`, `chatflow.open_turn/walk_turn/move_on_after_capture`, `store.fold_walk`). The app speaks first:
+  `POST /chat/{pid}/open` {reviewer_id} runs once onboarding is closed and a paper is attached (the frontend calls it after
+  upload, when onboarding closes with a paper attached, and on reload). It returns `{opened, messages:[{kind: "summary" |
+  "section", reply, parts, cites}], reason?}` and logs each message as an assistant `chat_turn` (meta `opening`, `cites`,
+  `parts`) plus an `opening_made` event on the paper, so a reload gets `opened:false, reason:"already"` and nothing repeats.
+  Message 1, only when `summary_preference` is `before_reading`: a descriptive, claim-based summary written by the model
+  through `generate_checked` (the normal neutrality checks, plus `require_pointer`: it must carry section pointers); if the
+  checks never pass or the model is down it is silently left out (never the generic fallback). `after_reading`, `none`,
+  `on_request` or unset: no summary and no model call. Message 2 (the walk's first section, app-written): "Starting with the
+  intro, as you said you like to (Section 1)." plus a one-line hint on how to move, jump or stop; cites the section's first
+  <=3 passages so the PDF scrolls there. The reading order is `walk.parse_reading_order` over the reviewer's own
+  `reading_order` text (source `answer`, or the extracted sentence; a skip/default says nothing): loose word matching
+  (intro, methods/approach/setup/model, results/experiments/evaluation, related work, conclusion, limitations, "section 3")
+  against the paper's real section titles (`walk.real_sections`: no References/front matter/stray text); sections the
+  reviewer names come first with their word (`said`), the rest follow in paper order with `said: null` (the app never claims
+  "as you said" for those); a word in a clause with skip/never/last is not an instruction; unparseable or linear answers
+  ("straight through") are plain paper order. Walk events on the paper: `opening_made` {order}, `walk_at` {index, section,
+  reason}, `walk_done`, `walk_stopped`; `store.walk_state` folds them (pointer, covered, stopped, done). During the walk
+  the app answers these itself, with no model call: a done signal ("ok", "next", "got it", "move on", ...) -> "Moving to the
+  methods, as you said." (next section not yet shown, after the pointer; its spans cited); a jump ("go to results", "take me
+  to section 3", only when the whole message is the move) -> "Going to the results, as you asked." and the pointer resets
+  there; the end of the order -> "That was the last section in your order." plus the open review-form sections (the gap
+  report); "stop guiding" -> stopped for good (no resume; nudges stop too). A covered section is not shown again unless the
+  reviewer jumps back to it. An accepted capture moves on after the app's "Added to ..." line unless that turn carries a
+  nudge, a fresh offer, a gap list or a draft. Walk lines contain only the reviewer's own word, the paper's heading
+  (repeated only if `walk.rates` finds no evaluative word in it, else "the next section") and a pointer.
 - Flow toggle: `COPILOT_FLOW=chat` (default) or `guided` (turns `/chat` off with a 409);
   `GET /config` reports it. The old guided flow's endpoints and source files are unchanged;
   the frontend keeps it behind `?mode=guided`.
@@ -175,26 +201,27 @@ reports today; update them when they change.
 
 1. **Python** (all backend tests, including the old-flow Python loop tests):
    `.\.venv\Scripts\python.exe -m pytest`
-   -> 1522 passed, 8 skipped (1530 collected: tests/neutrality 827, tests/onboarding 660,
-   tests/loops 43). The 8 skipped are the `live` tests (item 5); any other live model call must
-   fail loudly. (If RUN_LIVE=1 is set in your shell the 8 run too: 1530 passed.) HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
+   -> 1667 passed, 10 skipped (1677 collected: tests/neutrality 931, tests/onboarding 703,
+   tests/loops 43). The 10 skipped are the `live` tests (item 5); any other live model call must
+   fail loudly. (If RUN_LIVE=1 is set in your shell the 10 run too: 1677 passed.) HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
    tests/conftest.py points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
 2. **Old-flow loop tests** (node):
    `node --test tests/loops/*.test.mjs`
    -> 12 tests.
 3. **Chat-first frontend tests** (node):
    `node --test tests/chat/*.test.mjs`
-   -> 137 tests: controller, API client, draft model, flow switch, criteria chips, citations to
-   highlights (`cites.test.mjs`), the browser scripts' skip logic, and a render test that loads the
+   -> 163 tests: controller, API client, draft model, flow switch, criteria chips, citations to
+   highlights (`cites.test.mjs`), the opening turn (`opening.test.mjs`), message formatting
+   (`format.test.mjs`), the browser scripts' skip logic, and a render test that loads the
    real components through Vite's SSR loader and lists every control on screen (PDF pane included).
-   Both node suites together: `node --test tests/loops/*.test.mjs tests/chat/*.test.mjs` -> 149.
+   Both node suites together: `node --test tests/loops/*.test.mjs tests/chat/*.test.mjs` -> 175.
 4. **Frontend build** (run in frontend/): `npm run build`. Optional lint of the chat code, also
    in frontend/: `npx oxlint src/chat src/main.jsx src/pdf` (should print nothing).
 5. **Live-model tests** (not in the default run; real model calls with the real key):
    put the real OPENROUTER_API_KEY and MODEL from backend/.env into the environment first
    (tests/conftest.py otherwise gives them dummy values), then
    `$env:RUN_LIVE = "1"; .\.venv\Scripts\python.exe -m pytest -m live`
-   -> 8 tests.
+   -> 10 tests (8 chat-checks + 2 for the guided walk, `test_walk_live.py`).
 6. **Browser end-to-end check** (not in the default run; needs Chrome and a built frontend):
    `node scripts/e2e/drive.mjs` (full journey; a few real model calls, needs the key in
    backend/.env), `node scripts/e2e/drive.mjs --offline` (no model, no key),
@@ -232,6 +259,13 @@ reports today; update them when they change.
   are never added unprompted.
   - Onboarding happens as the first messages of the same thread, one question at a
   time. No separate form, no wizard.
+- Assistant messages render `**bold**`, bullet/numbered lists and paragraph breaks (`frontend/src/chat/format.js`: text
+  becomes plain data and React renders strings and `<strong>`, so a reply can never inject HTML; pointers stay clickable
+  inside bold and list items). The reviewer's own messages are shown exactly as typed. A single plain paragraph keeps the
+  plain `<p class="ca-msg ca-assistant">`.
+- Onboarding answers are READ through `onboarding.tidy` (stray quotes/brackets, a leading "yes,"/"ok,"); what the reviewer
+  wrote is what is stored. After a paper is attached the app does not post "Got the paper" when it can open (the opening is
+  the reply); there is no "Switched to the new paper." message.
 - No per-message buttons. Allowed UI: Send, a paperclip for paper upload, a small
   "Review draft" toggle that opens a side panel (read, edit, copy all), and inline
   choice chips only when onboarding returns a criteria menu for a novice.
