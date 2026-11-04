@@ -216,6 +216,20 @@ def resolve_by_rule(pid, st, message, names):
     return None
 
 
+def tone_notes(hist):
+    """Variety, enforced by looking at what was just said rather than by asking for it in general: do not open
+    the way the last reply opened, and after two replies that ended in a question, end on a plain statement."""
+    replies = [h["text"] for h in hist if h["role"] == "assistant" and not (h.get("meta") or {}).get("onboarding")]
+    notes = []
+    if replies:
+        opening = " ".join(replies[-1].split()[:3])
+        notes.append(f"Your last reply began “{opening}”. Begin this one differently.")
+    if len(replies) >= 2 and all(r.rstrip().endswith("?") for r in replies[-2:]):
+        notes.append("Your last two replies ended with a question. Unless a question is really needed, end this "
+                     "reply with a plain statement.")
+    return notes
+
+
 def resolve_nudge(pid, st, message, sections):
     """What became of the nudge offered last turn: dismissed (an explicit "not now"/"no"), followed (they went
     there), or ignored. Two ignores count as a dismissal (see store.fold_chat)."""
@@ -349,6 +363,7 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
         notes.append(f"Last turn you offered to add “{offered['text']}” under "
                      f"{names.get(offered['section'], 'their draft')}. If this message answers that offer, set "
                      "offer_response.")
+    notes += tone_notes(hist)
     nudge = choose_nudge(pid, spans, view, phrases, st, message, ruled, wants_decline)
     if nudge:
         notes.append(nudges.nudge_note(nudge))
@@ -443,18 +458,48 @@ def generate_checked(msgs, ctx, phrases):
     return fallback, {"attempts": 2, "fallback": True, "errors": errs}, {}
 
 
+# Brief acknowledgements for onboarding answers. They say "I heard you", never "that was a good answer": no
+# praise, no judgment of the answer. Chosen by turn number so that consecutive acknowledgements differ.
+ACKS = ["Got it.", "Okay, noted.", "Noted.", "Understood.", "Alright.", "Thanks."]
+ACKS_QUOTING = ["Got it: “{w}”.", "Noted: “{w}”.", "So: “{w}”.", "Okay, “{w}”."]
+ACKS_SKIPPED = ["No problem, we can leave that one.", "That's fine, I'll leave that open.", "Okay, moving on.",
+                "Fine, we'll skip it."]
+INTRO = ("Before we get into the paper, I'd like to ask a few quick questions about how you like to work, one at a "
+         "time. You can skip any of them.")
+
+
+def onboarding_ack(outcome, answer, free_text, turn):
+    """A few words acknowledging the last onboarding answer, or "" when there is nothing to acknowledge
+    (a first message, or a reply that was not an answer and is being followed up)."""
+    if outcome == "answered":
+        words = answer.split()
+        if free_text and len(words) >= 4:  # the reviewer's own words, reflected back
+            return ACKS_QUOTING[turn % len(ACKS_QUOTING)].format(w=" ".join(words[:12]))
+        return ACKS[turn % len(ACKS)]
+    if outcome in ("skipped", "defaulted"):
+        return ACKS_SKIPPED[turn % len(ACKS_SKIPPED)]
+    return ""
+
+
 def onboarding_turn(pid, rid, message, st):
-    """Onboarding runs inside the same thread: the message answers the pending question, and the reply is
-    the next question. A first message with no question pending just gets the first question."""
+    """Onboarding runs inside the same thread: the message answers the pending question, and the reply is a short
+    acknowledgement followed by the next question. A first message with no question pending gets an introduction
+    and the first question."""
     key = store.reviewer_key(rid)
+    ack, first = "", st["pending"] is None and st["turn"] == 0
     if st["pending"] is not None:
-        for e in onboarding.process(st, message, onboarding.model_on_topic):
+        answered = onboarding.process(st, message, onboarding.model_on_topic)
+        for e in answered:
             store.log(key, e["type"], e["payload"])
+        done = next((e["payload"] for e in answered if e["type"] == "onboarding_answered"), {})
+        ack = onboarding_ack(done.get("outcome"), message.strip(), done.get("field") not in onboarding.STRUCTURED,
+                             st["turn"])
         st = store.onboarding(rid)
     evs, step = onboarding.next_step(st, rid)
     for e in evs:
         store.log(key, e["type"], e["payload"])
-    reply = step_text(step)
+    lead = INTRO if first and not step["done"] else ack
+    reply = "\n\n".join(x for x in (lead, step_text(step)) if x)
     log_chat(pid, "user", message, onboarding=True)
     log_chat(pid, "assistant", reply, onboarding=True)
     view = onboarding.profile_view(store.onboarding(rid))
