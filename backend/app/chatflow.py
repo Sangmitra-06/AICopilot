@@ -400,6 +400,8 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
         if isinstance(j.get("reword"), dict):
             out["reword"] = {"original": j["reword"]["original"], "text": j["reword"]["text"]}
         new = valid_views(j, message, store.chat_state(pid)["views"], names)
+        have = [{"text": i["text"]} for i in synth.items(pid)]
+        new = [v for v in new if not coverage.in_draft(v["text"], have)]   # already in their draft: nothing to offer
         made = None
         for v in new:
             n = len(store.chat_state(pid)["views"]) + 1

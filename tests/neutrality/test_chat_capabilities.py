@@ -367,3 +367,21 @@ def test_a_draft_request_can_come_from_the_model_in_other_words(env, monkeypatch
     add_note(21, "weaknesses", "Five participants per region seems low")
     set_model({"reply": "On it.", "intent": "draft"})
     assert post(c, "assemble what I have into a review")["drafted"]["drafted"] == ["Summary of weaknesses"]
+
+
+def test_a_view_already_in_the_draft_is_not_offered_again(env):
+    c, set_model = env
+    add_note(5, "weaknesses", "Five participants per region seems low")
+    set_model(stated(view=VIEW))
+    body = post(c, f"I think {VIEW}.")
+    assert body["capture"] is None and store.chat_state("p1")["views"] == {}
+    assert len(notes()) == 1
+
+
+def test_the_same_view_stated_twice_is_captured_once(env):
+    c, set_model = env
+    set_model(stated(), {"reply": "Added."}, stated(), {"reply": "Sure."})
+    post(c, f"I think {VIEW}.")
+    post(c, "yes")
+    body = post(c, f"I still think {VIEW}.")
+    assert body["capture"] is None and len(notes()) == 1
