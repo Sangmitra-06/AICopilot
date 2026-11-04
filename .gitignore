@@ -1,13 +1,23 @@
-@"
-# backend: secrets, data, and environment
-backend/.env
-backend/copilot.db
-backend/data/
-backend/.venv/
+# secrets and environment
+.env
+**/.env
+.venv/
+**/.venv/
+
+# local data and databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+**/data/
+
+# python
 **/__pycache__/
 *.pyc
+.pytest_cache/
 
-# frontend: Vite defaults
+# frontend
 frontend/node_modules/
 frontend/dist/
 frontend/dist-ssr/
@@ -20,4 +30,3 @@ logs
 !.vscode/extensions.json
 .idea
 .DS_Store
-"@ | Set-Content .gitignore -Encoding ascii
