@@ -145,3 +145,41 @@ def test_chat_check_require_pointer_is_off_by_default():
     assert cc.reply_errors("Hello there.", {}) == []
     assert any("pointer" in e for e in cc.reply_errors("Hello there.", {"require_pointer": True}))
     assert cc.reply_errors("The authors report X (Section 3).", {"require_pointer": True}) == []
+
+
+# ------------------------------------------------------------------ a conversational summary (item 2 of the fixes)
+
+# The real session's summary, as the model wrote it: three descriptive sentences. The reviewer read it as a cold block.
+def test_the_summary_has_a_short_friendly_lead_in_and_close_around_the_descriptive_part(chat_env):
+    from app import walk
+    c, set_model = chat_env
+    before()
+    set_model({"reply": SUMMARY})
+    reply = open_(c)["messages"][0]["reply"]
+    paras = reply.split("\n\n")
+    assert len(paras) == 3, reply
+    lead, body, close = paras
+    assert lead == walk.SUMMARY_LEAD and close in walk.SUMMARY_CLOSES
+    assert body.startswith("The authors say they study probing") and len(walk.sentences(body)) == 3
+    for line in (lead, close):                                     # friendly, and says nothing about the paper
+        assert len(line.split()) <= 16 and not walk.rates(line) and not BANNED.search(line)
+        assert "(" not in line                                     # no pointer on the app's own lines
+
+
+def test_the_lead_in_and_close_do_not_count_toward_the_three_sentences(chat_env):
+    from app import walk
+    c, set_model = chat_env
+    before()
+    set_model({"reply": SUMMARY + " They also report results on CoLA [s4]."})
+    body = open_(c)["messages"][0]["reply"].split("\n\n")[1]
+    assert len(walk.sentences(body)) == 3                            # the descriptive part is still capped at three
+
+
+def test_the_close_does_not_promise_a_walk_when_there_is_no_section_to_go_to(chat_env, monkeypatch):
+    from app import walk
+    c, set_model = chat_env
+    before()
+    set_model({"reply": SUMMARY})
+    monkeypatch.setattr(walk, "build_order", lambda view, spans: [])
+    reply = open_(c)["messages"][0]["reply"]
+    assert reply.split("\n\n")[-1] == walk.SUMMARY_CLOSES[1]

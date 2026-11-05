@@ -343,10 +343,11 @@ PARA = "\n\n"
 OPEN_LOCK = threading.Lock()  # one opening at a time: a double click or a reload must not make two
 
 
-def opening_summary(pid, phrases, spans, names):
+def opening_summary(pid, phrases, spans, names, walk_follows=True):
     """The descriptive summary for a reviewer who asked for one before reading, through the same checks as every chat
-    reply (plus: it must carry section pointers). None if the checks never pass or the model is down: the opening just
-    goes without a summary, and the generic fallback line is never shown in its place."""
+    reply (plus: it must carry section pointers), between the app's own short friendly lead-in and close (walk.py). None
+    if the checks never pass or the model is down: the opening just goes without a summary, and the generic fallback line
+    is never shown in its place."""
     system = build_chat_system(phrases, "before_reading", paper_text(spans), draft_text(pid), [prompts.OPENING_NOTE],
                                sections=list(names.items()))
     ctx = {"reviewer_text": " ".join(phrases.values()), "wants_decline": False, "summary_pref": "before_reading",
@@ -359,9 +360,9 @@ def opening_summary(pid, phrases, spans, names):
     sections = [{"id": i, "name": n} for i, n in names.items()]
     reply, _ = capture.scrub(reply, sections, claims_ok=False, offers_ok=False, empty_line="")   # no offers, no claims
     reply, hidden = walk.one_pointer_each(reply, {s["id"]: s for s in spans if cites.citable(s)}, limit=3)   # <= 3 sentences
-    shown, parts, found = cites.extract(reply, spans)
-    if not shown.strip() or not found:
+    if not cites.extract(reply, spans)[2]:
         return None
+    shown, parts, found = cites.extract(walk.summary_message(reply, walk_follows), spans)
     return {"kind": "summary", "reply": shown, "parts": parts, "cites": add_hidden(found, hidden, spans)}
 
 
@@ -425,11 +426,11 @@ def open_turn(pid, rid, spans):
         view = onboarding.profile_view(ob)
         phrases, names = profile_phrases(view), synth.names()
         messages = []
+        order = walk.build_order(view, spans)
         if summary_preference(view) == "before_reading":
-            s = opening_summary(pid, phrases, spans, names)
+            s = opening_summary(pid, phrases, spans, names, walk_follows=bool(order))
             if s:
                 messages.append(s)
-        order = walk.build_order(view, spans)
         summarized = bool(messages)
         if order:
             messages.append(section_message(pid, view, spans, order[0], walk.opening_lead(order[0]), walk.GUIDE_HINT))

@@ -173,6 +173,17 @@ def opening_line(entry, spans):
     return marked(opening_lead(entry), spans, entry["section"])
 
 
+# The app's own friendly words around the opening summary (the model writes only the descriptive middle, at most three
+# sentences). They say what the message is and what comes next, never anything about the paper.
+SUMMARY_LEAD = "You asked for a short summary before reading, so here's what the paper says."
+SUMMARY_CLOSES = ("That's the short version. Now let's go through the paper together.",   # a first section follows
+                  "That's the short version. Ask me about any part whenever you like.")      # no walk to follow
+
+
+def summary_message(body, walk_follows=True):
+    return SUMMARY_LEAD + "\n\n" + body + "\n\n" + SUMMARY_CLOSES[0 if walk_follows else 1]
+
+
 GUIDE_HINT = "Say “next” when you want to move on, name any part to go straight there, or tell me to stop guiding."
 
 

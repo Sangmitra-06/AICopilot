@@ -131,6 +131,7 @@ def test_the_summary_is_at_most_three_sentences_with_one_pointer_each(env):
                         "They add more [p2-s2]. And more [p2-s1]."}, {"reply": INTRO})
     body = c.post("/chat/p1/open", json={"reviewer_id": "rev"}).json()
     summary = body["messages"][0]
-    assert summary["kind"] == "summary" and len(sentence_list(summary["reply"])) <= 3
+    descriptive = summary["reply"].split("\n\n")[1]            # between the app's friendly lead-in and close
+    assert summary["kind"] == "summary" and len(sentence_list(descriptive)) <= 3
     for s in sentence_list(summary["reply"]):
         assert len(pointers(s)) <= 1
