@@ -1,127 +1,176 @@
-/* The chat-first screen. Loaded only with the chat screen, so it cannot affect the old guided flow's styles. */
-
-:root {
-  --ca-bg: #faf9f6;
-  --ca-surface: #ffffff;
-  --ca-ink: #1d2129;
-  --ca-muted: #6b7180;
-  --ca-line: #e6e3dc;
-  --ca-accent: #3a56d4;          /* the one accent colour */
-  --ca-accent-tint: #e9edfd;
-  --ca-font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
+/* The chat-first screen. Loaded only with the chat screen, so it cannot affect the old guided flow's styles.
+   Every colour, font and timing comes from theme.css. */
+@import './theme.css';
 
 html, body, #root { height: 100%; margin: 0; }
-body { background: var(--ca-bg); color: var(--ca-ink); font-family: var(--ca-font); font-size: 17px; line-height: 1.6; }
+body {
+  background: var(--ca-bg); color: var(--ca-ink); font-family: var(--ca-sans); font-size: 16px; line-height: var(--ca-leading);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+}
 .ca-root *, .ca-root *::before, .ca-root *::after { box-sizing: border-box; }
 :where(.ca-root) button, :where(.ca-root) textarea { font: inherit; color: inherit; }   /* zero specificity: component colours win */
 :where(.ca-root) :focus-visible { outline: 2px solid var(--ca-accent); outline-offset: 2px; }
+:where(.ca-root) ::selection { background: var(--ca-accent-soft); }
+:where(.ca-root) * { scrollbar-width: thin; scrollbar-color: var(--ca-line-strong) transparent; }
 
 .ca-root { display: flex; height: 100%; background: var(--ca-bg); }
 .ca-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-/* a pointer in a reply, "(Section 4)": plain text that shows the passage in the PDF when clicked (not a button) */
-.ca-cite { cursor: pointer; border-bottom: 1px dotted var(--ca-muted); }
-.ca-cite:hover { border-bottom-color: var(--ca-accent); color: var(--ca-accent); }
+/* a pointer in a reply, "(Section 4)": a quiet footnote-style mark that shows the passage in the PDF when clicked
+   (plain text, not a button) */
+.ca-cite {
+  cursor: pointer; font-family: var(--ca-sans); font-size: 0.82em; letter-spacing: 0.01em; white-space: nowrap;
+  color: var(--ca-accent); text-decoration: underline; text-decoration-color: transparent;
+  text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: 3px;
+  transition: text-decoration-color 150ms ease, color 150ms ease;
+}
+.ca-cite:hover { color: var(--ca-accent-ink); text-decoration-color: currentColor; }
 
-/* after a paper is attached: the PDF on the left, the chat on the right (a laptop screen is about 1366px wide) */
+/* after a paper is attached: the paper on the left like a sheet on a desk, the chat on the right
+   (a laptop screen is about 1366px wide) */
 .ca-pdf { flex: 0 0 46%; min-width: 360px; max-width: 760px; border-right: 1px solid var(--ca-line); }
 .ca-with-pdf { position: relative; }
-.ca-with-pdf .ca-column, .ca-with-pdf .ca-box { max-width: none; }
-.ca-with-pdf .ca-thread { padding: 8px 24px 16px; }
-.ca-with-pdf .ca-composer { padding: 8px 20px 20px; }
+.ca-with-pdf .ca-thread { padding: 8px 28px 16px; }
+.ca-with-pdf .ca-composer { padding: 8px 24px 20px; }
 /* the draft panel opens over the chat, under the toggle, so it never squeezes the PDF */
 .ca-with-pdf .ca-panel {
   position: absolute; top: 52px; right: 0; bottom: 0; width: min(420px, 100% - 360px); z-index: 2;
-  border-top: 1px solid var(--ca-line); box-shadow: -8px 0 24px rgba(29, 33, 41, 0.1);
+  border-top: 1px solid var(--ca-line); box-shadow: var(--ca-panel-shadow);
 }
-.ca-with-pdf .ca-panel-body { padding-top: 20px; }
+.ca-with-pdf .ca-panel-body { padding-top: 24px; }
 
 /* the draft toggle: small, in a slim bar above the thread so it never covers text */
 .ca-bar { flex: none; display: flex; justify-content: flex-end; padding: 14px 20px 0; }
 .ca-toggle {
-  background: var(--ca-bg); border: 1px solid var(--ca-line); border-radius: 999px;
-  padding: 5px 14px; font-size: 14px; color: var(--ca-muted); cursor: pointer;
+  background: transparent; border: 1px solid var(--ca-line-strong); border-radius: var(--ca-radius-s);
+  padding: 4px 12px; font-family: var(--ca-sans); font-size: 13px; letter-spacing: 0.02em; color: var(--ca-muted); cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
-.ca-toggle:hover { color: var(--ca-ink); border-color: #cfcbc1; }
-.ca-toggle[aria-pressed='true'] { color: var(--ca-accent); border-color: var(--ca-accent); background: var(--ca-accent-tint); }
+.ca-toggle:hover { color: var(--ca-ink); border-color: var(--ca-muted); }
+.ca-toggle[aria-pressed='true'] { color: var(--ca-accent-ink); border-color: var(--ca-accent); background: var(--ca-accent-soft); }
 
-/* the thread */
-.ca-thread { flex: 1; overflow-y: auto; padding: 16px 24px 16px; }
-.ca-column { max-width: 700px; margin: 0 auto; }
-.ca-msg { margin: 0 0 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.ca-assistant { max-width: 100%; }
+/* the thread: the assistant writes on the page, the reviewer's own words sit on a soft tint */
+.ca-thread { flex: 1; overflow-y: auto; padding: 16px 28px 16px; }
+.ca-column { max-width: var(--ca-measure); margin: 0 auto; }
+/* before a paper is attached the column reads like the first page of a notebook: room above, a short rule */
+.ca-root:not(.ca-with-pdf) .ca-column { padding-top: min(9vh, 72px); }
+.ca-root:not(.ca-with-pdf) .ca-column::before {
+  content: ''; display: block; width: 36px; margin: 0 0 28px; border-top: 1px solid var(--ca-line-strong);
+}
+
+.ca-msg { margin: 0 0 16px; white-space: pre-wrap; overflow-wrap: anywhere; animation: ca-in var(--ca-fade) var(--ca-ease) both; }
+.ca-assistant {
+  max-width: 100%; font-family: var(--ca-serif); font-size: 18px; line-height: var(--ca-leading);
+  font-optical-sizing: auto; color: var(--ca-ink); hanging-punctuation: first;
+}
+.ca-assistant strong { font-weight: 600; }
 /* an assistant message with lists or paragraphs: block elements instead of one pre-wrapped line */
 .ca-fmt { white-space: normal; }
-.ca-fmt p { margin: 0 0 10px; }
-.ca-fmt ul, .ca-fmt ol { margin: 0 0 10px; padding-left: 22px; }
-.ca-fmt li { margin: 0 0 4px; }
+.ca-fmt p { margin: 0 0 12px; }
+.ca-fmt ul, .ca-fmt ol { margin: 0 0 12px; padding-left: 1.3em; }
+.ca-fmt li { margin: 0 0 6px; padding-left: 0.2em; }
+.ca-fmt li::marker { color: var(--ca-muted); }
 .ca-fmt > :last-child { margin-bottom: 0; }
-.ca-user { margin-left: auto; width: fit-content; max-width: 85%; background: var(--ca-accent-tint); padding: 10px 16px; border-radius: 18px; }
-.ca-wait { color: var(--ca-muted); letter-spacing: 0.2em; }
+.ca-user {
+  margin: 26px 0 28px auto; width: fit-content; max-width: 85%; padding: 9px 15px;
+  background: var(--ca-tint); border-radius: var(--ca-radius-s);
+  font-family: var(--ca-sans); font-size: 16px; line-height: 1.55; color: var(--ca-ink);
+}
+.ca-msg:first-child { margin-top: 0; }
+
+/* working: three quiet dots in place of the text (the "…" stays in the markup for anything that reads it) */
+.ca-wait { position: relative; height: 28px; font-size: 0; line-height: 0; color: transparent; }
+.ca-wait::before {
+  content: ''; position: absolute; left: 2px; top: 50%; width: 5px; height: 5px; margin-top: -2px; border-radius: 50%;
+  background: var(--ca-muted); box-shadow: 11px 0 0 var(--ca-muted), 22px 0 0 var(--ca-muted);
+  animation: ca-dots 1.2s ease-in-out infinite;
+}
 
 /* inline choice chips (novices only) */
-.ca-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 22px; }
+.ca-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: -2px 0 24px; animation: ca-in var(--ca-fade) var(--ca-ease) both; }
 .ca-chip {
-  background: var(--ca-surface); border: 1px solid var(--ca-line); border-radius: 999px;
-  padding: 6px 14px; font-size: 15px; cursor: pointer;
+  background: var(--ca-surface); border: 1px solid var(--ca-line-strong); border-radius: var(--ca-radius-s);
+  padding: 5px 12px; font-family: var(--ca-sans); font-size: 14px; line-height: 1.5; color: var(--ca-ink); cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
 }
 .ca-chip:hover { border-color: var(--ca-accent); }
 .ca-chip[aria-pressed='true'] { background: var(--ca-accent); border-color: var(--ca-accent); color: #fff; }
+.ca-chip[aria-pressed='true']:hover { background: var(--ca-accent-ink); }
 
-/* the one text box: paperclip inside on the left, send inside on the right */
-.ca-composer { padding: 8px 24px 28px; }
+/* the one text box: paperclip inside on the left, send inside on the right, both thin line icons */
+.ca-composer { padding: 8px 28px 26px; }
 .ca-box {
-  max-width: 700px; margin: 0 auto; display: flex; align-items: flex-end; gap: 4px;
-  background: var(--ca-surface); border: 1px solid var(--ca-line); border-radius: 22px; padding: 6px;
-  box-shadow: 0 1px 2px rgba(29, 33, 41, 0.04);
+  max-width: var(--ca-measure); margin: 0 auto; display: flex; align-items: flex-end; gap: 2px;
+  background: var(--ca-surface); border: 1px solid var(--ca-line-strong); border-radius: var(--ca-radius-m); padding: 5px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
-.ca-box:focus-within { border-color: var(--ca-accent); }
+.ca-box:focus-within { border-color: var(--ca-accent); box-shadow: 0 0 0 3px var(--ca-accent-soft); }
 .ca-box textarea {
   flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent;
-  padding: 8px 6px; max-height: 168px; line-height: 1.5;
+  padding: 8px 6px; max-height: 168px; font-family: var(--ca-sans); font-size: 16px; line-height: 1.5;
 }
+.ca-box textarea::placeholder { color: var(--ca-muted); opacity: 1; }
 .ca-icon {
-  flex: none; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 50%;
-  background: transparent; color: var(--ca-muted); cursor: pointer;
+  flex: none; width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 10px;
+  background: transparent; color: var(--ca-muted); cursor: pointer; transition: color 150ms ease, background-color 150ms ease;
 }
-.ca-icon:hover { color: var(--ca-ink); }
-.ca-send { background: var(--ca-accent); color: #fff; }
-.ca-send:hover { color: #fff; background: #2f47b5; }
-.ca-send:disabled { background: #d9d6ce; color: #fff; cursor: default; }
+.ca-icon:hover { color: var(--ca-ink); background: var(--ca-tint); }
+.ca-send { color: var(--ca-accent); }
+.ca-send:hover { color: var(--ca-accent-ink); background: var(--ca-accent-soft); }
+.ca-send:disabled, .ca-send:disabled:hover { color: var(--ca-line-strong); background: transparent; cursor: default; }
 
 /* dropping a PDF onto the thread */
-.ca-drag .ca-thread { outline: 2px dashed var(--ca-accent); outline-offset: -14px; background: var(--ca-accent-tint); }
+.ca-drag .ca-thread { outline: 1.5px dashed var(--ca-accent); outline-offset: -14px; background: var(--ca-accent-soft); }
 
-/* the review draft side panel */
+/* the review draft side panel: a notebook. Section names in small caps, the reviewer's words in the serif */
 .ca-panel {
   flex: none; width: 420px; display: flex; flex-direction: column;
   background: var(--ca-surface); border-left: 1px solid var(--ca-line);
 }
-.ca-panel-body { flex: 1; overflow-y: auto; padding: 56px 24px 16px; }
-.ca-panel-foot { padding: 14px 24px 22px; border-top: 1px solid var(--ca-line); }
-.ca-section { margin: 0 0 28px; }
-.ca-section h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ca-muted); }
+.ca-panel-body { flex: 1; overflow-y: auto; padding: 56px 28px 16px; }
+.ca-panel-foot { padding: 14px 28px 22px; border-top: 1px solid var(--ca-line); }
+.ca-section { margin: 0 0 30px; }
+.ca-section h2 {
+  margin: 0 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--ca-line);
+  font-family: var(--ca-serif); font-size: 16px; font-weight: 600; font-variant-caps: all-small-caps;
+  letter-spacing: 0.07em; color: var(--ca-muted);
+}
 .ca-para {
-  display: block; width: 100%; resize: none; overflow: hidden; border: 1px solid transparent; border-radius: 10px;
-  background: transparent; padding: 8px 10px; margin: 0 -10px 4px; line-height: 1.55;
+  display: block; width: 100%; resize: none; overflow: hidden; border: 1px solid transparent; border-radius: var(--ca-radius-s);
+  background: transparent; padding: 6px 10px; margin: 0 -10px 4px;
+  font-family: var(--ca-serif); font-size: 16.5px; line-height: var(--ca-leading); font-optical-sizing: auto;
+  transition: border-color 150ms ease, background-color 150ms ease;
 }
 .ca-para:hover { border-color: var(--ca-line); }
-.ca-para:focus { outline: none; border-color: var(--ca-accent); background: #fff; }
-.ca-empty, .ca-note { margin: 0; color: var(--ca-muted); font-size: 15px; }
-.ca-note { margin-bottom: 24px; }
-.ca-label { margin: 6px 0 0; color: var(--ca-muted); font-size: 12px; font-style: italic; }
+.ca-para:focus { outline: none; border-color: var(--ca-accent); background: #fff; box-shadow: 0 0 0 3px var(--ca-accent-soft); }
+.ca-empty { margin: 0; color: var(--ca-muted); font-family: var(--ca-serif); font-style: italic; font-size: 15.5px; }
+.ca-note { margin: 0 0 24px; color: var(--ca-muted); font-size: 15px; }
+.ca-label { margin: 8px 0 0; color: var(--ca-muted); font-family: var(--ca-sans); font-size: 12px; font-style: italic; letter-spacing: 0.01em; }
 .ca-copy {
-  width: 100%; background: var(--ca-accent); color: #fff; border: 0; border-radius: 12px; padding: 10px 16px; cursor: pointer;
+  width: 100%; background: var(--ca-accent); color: #fff; border: 1px solid var(--ca-accent); border-radius: var(--ca-radius-s);
+  padding: 9px 16px; font-family: var(--ca-sans); font-size: 14px; font-weight: 500; letter-spacing: 0.02em; cursor: pointer;
+  transition: background-color 150ms ease;
 }
-.ca-copy:hover { background: #2f47b5; }
+.ca-copy:hover { background: var(--ca-accent-ink); border-color: var(--ca-accent-ink); }
+
+/* motion: a quiet fade for new messages and a slow pulse for the working dots */
+@keyframes ca-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes ca-dots {
+  0%, 100% { background: var(--ca-muted); box-shadow: 11px 0 0 var(--ca-line-strong), 22px 0 0 var(--ca-line-strong); }
+  33% { background: var(--ca-line-strong); box-shadow: 11px 0 0 var(--ca-muted), 22px 0 0 var(--ca-line-strong); }
+  66% { background: var(--ca-line-strong); box-shadow: 11px 0 0 var(--ca-line-strong), 22px 0 0 var(--ca-muted); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ca-root *, .ca-root *::before, .ca-root *::after { animation: none !important; transition: none !important; }
+}
 
 @media (max-width: 900px) {
   .ca-pdf { display: none; }                         /* too narrow for two panes: chat only */
   .ca-with-pdf .ca-panel { top: 0; width: min(420px, 100%); position: fixed; bottom: 0; }
-  .ca-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100%); z-index: 3; box-shadow: -8px 0 24px rgba(29, 33, 41, 0.12); }
+  .ca-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100%); z-index: 3; box-shadow: var(--ca-panel-shadow); }
 }
 @media (max-width: 520px) {
   body { font-size: 16px; }
+  .ca-assistant { font-size: 17px; }
   .ca-thread, .ca-composer { padding-left: 16px; padding-right: 16px; }
 }

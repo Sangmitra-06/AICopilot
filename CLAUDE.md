@@ -321,6 +321,10 @@ reports today; update them when they change.
 - No per-message buttons. Allowed UI: Send, a paperclip for paper upload, a small
   "Review draft" toggle that opens a side panel (read, edit, copy all), and inline
   choice chips only when onboarding returns a criteria menu for a novice.
+- Visual style: calm and editorial. All colours, fonts and motion timings are CSS variables in
+  `frontend/src/chat/theme.css` (imported by chat.css; pdf.css reads them with fallbacks). Assistant text and the draft
+  in Source Serif 4 (self-hosted via `@fontsource-variable/source-serif-4`), labels and controls in the system sans.
+  One muted accent; no gradients, glows or purple. The PDF marker keeps its base colour rgb(255,214,102) (drive-pdf checks it).
 - The PDF pane adds no buttons or toggles. Its only marks are page-number labels ("p4"),
   highlights (one neutral colour) and the rectangle shown while dragging a box. A pointer in a
   reply, "(Section 4)", is plain text, not a button; clicking it shows its highlight again.

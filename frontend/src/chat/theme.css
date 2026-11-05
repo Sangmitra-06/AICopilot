@@ -1,0 +1,41 @@
+/* Design tokens for the chat-first screen (and its PDF pane). The one place for colours, type and motion.
+   Loaded only with the chat screen (through chat.css), so the old guided flow never sees them.
+   Contrast (WCAG 2.1, against --ca-bg): ink 15.3:1, muted 6.3:1, accent 6.1:1; white on accent 6.7:1. */
+@import '@fontsource-variable/source-serif-4/opsz.css';   /* self-hosted: bundled by Vite, no font CDN */
+
+:root {
+  /* paper and ink */
+  --ca-bg: #f7f4ee;              /* warm off-white page */
+  --ca-surface: #fdfcf9;         /* the draft notebook, the text box */
+  --ca-tint: #eeeae1;            /* the reviewer's own messages */
+  --ca-desk: #e8e4da;            /* behind the PDF pages */
+  --ca-ink: #1f1d1a;
+  --ca-muted: #5e5950;
+  --ca-line: #e2dcd1;            /* hairlines and borders */
+  --ca-line-strong: #cdc6b8;
+
+  /* the one accent: a muted ink green */
+  --ca-accent: #3e6455;
+  --ca-accent-ink: #2f5245;      /* hover / pressed */
+  --ca-accent-soft: rgba(62, 100, 85, 0.14);   /* focus halo, drop target */
+
+  /* the PDF marker: one neutral colour, it locates text and never rates it */
+  --ca-mark: rgba(255, 214, 102, 0.46);
+  --ca-mark-edge: rgba(201, 158, 40, 0.55);
+
+  /* type */
+  --ca-serif: 'Source Serif 4 Variable', 'Source Serif 4', 'Source Serif Pro', Georgia, 'Times New Roman', serif;
+  --ca-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --ca-measure: 37rem;           /* about 65 characters of the serif */
+  --ca-leading: 1.6;
+
+  /* shape and depth */
+  --ca-radius-s: 6px;
+  --ca-radius-m: 14px;
+  --ca-sheet-shadow: 0 1px 2px rgba(31, 29, 26, 0.08), 0 8px 22px -10px rgba(31, 29, 26, 0.22);
+  --ca-panel-shadow: -10px 0 30px -12px rgba(31, 29, 26, 0.18);
+
+  /* motion */
+  --ca-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ca-fade: 320ms;
+}
