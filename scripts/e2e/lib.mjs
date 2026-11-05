@@ -123,6 +123,16 @@ export function pythonPath() {
 
 export function track(child) { procs.push(child); return child }
 
+// Stop one tracked process (and its children), e.g. to restart the backend.
+export function stopOne(p) {
+  try {
+    if (process.platform === 'win32') spawnSync('taskkill', ['/F', '/T', '/PID', String(p.pid)], { stdio: 'ignore' })
+    else p.kill('SIGTERM')
+  } catch { /* already gone */ }
+  const i = procs.indexOf(p)
+  if (i >= 0) procs.splice(i, 1)
+}
+
 export function stopAll() {
   for (const p of procs) {
     try {
@@ -157,10 +167,10 @@ export function startBackend(tmp, extraEnv = {}) {
 }
 
 // The real backend with a scripted model (scripts/e2e/scripted_backend.py): no key and no network call.
-export function startScriptedBackend(tmp) {
+export function startScriptedBackend(tmp, extraEnv = {}) {
   fs.mkdirSync(OUT, { recursive: true })
   const logFd = fs.openSync(path.join(OUT, 'backend.log'), 'w')
-  const env = { ...process.env, COPILOT_DB: path.join(tmp, 'events.db'), COPILOT_DATA_DIR: path.join(tmp, 'data') }
+  const env = { ...process.env, COPILOT_DB: path.join(tmp, 'events.db'), COPILOT_DATA_DIR: path.join(tmp, 'data'), ...extraEnv }
   return track(spawn(pythonPath(), [path.join(ROOT, 'scripts', 'e2e', 'scripted_backend.py'), String(PORTS.backend)],
     { cwd: path.join(ROOT, 'backend'), env, stdio: ['ignore', logFd, logFd] }))
 }

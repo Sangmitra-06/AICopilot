@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import re
 from contextlib import asynccontextmanager
-from . import ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper, onboarding, venue, chatflow
+from . import fresh, ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper, onboarding, venue, chatflow
 from . import brief as brief_mod
 from . import guide as guide_mod
 
@@ -104,7 +104,11 @@ async def upload(file: UploadFile):
 
 
 @app.get("/papers/{pid}/pdf")
-def pdf(pid: str): return FileResponse(f"{DATA_DIR}/{pid}.pdf")
+def pdf(pid: str):
+    path = f"{DATA_DIR}/{pid}.pdf"
+    if not os.path.isfile(path):
+        raise HTTPException(404, "paper not found")
+    return FileResponse(path)
 
 
 @app.get("/papers/{pid}/spans")
@@ -487,7 +491,7 @@ def flow_mode():
 
 @app.get("/config")
 def config_ep():
-    return {"flow": flow_mode(), "chat_enabled": flow_mode() == "chat", "modes": list(FLOWS)}
+    return {"flow": flow_mode(), "chat_enabled": flow_mode() == "chat", "modes": list(FLOWS), "boot_id": fresh.BOOT_ID}
 
 
 class ChatReq(BaseModel): reviewer_id: str; message: str = Field(min_length=1, max_length=20000)

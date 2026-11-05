@@ -60,7 +60,7 @@ export default function ChatApp() {
 
   const pane = state.paperId ? (
     <Suspense fallback={null}>
-      <PdfViewer url={api.pdfUrl(state.paperId)} focus={state.focus} onSelect={onSelect} />
+      <PdfViewer url={api.pdfUrl(state.paperId)} focus={state.focus} onSelect={onSelect} onMissing={() => controller.paperMissing(state.paperId)} />
     </Suspense>
   ) : null
 

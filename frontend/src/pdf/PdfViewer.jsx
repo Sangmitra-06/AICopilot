@@ -3,6 +3,7 @@ import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import PdfPage from './PdfPage.jsx'
 import { scrollTarget } from '../chat/citeModel.js'
+import { isMissingPdf } from './missing.js'
 import './pdf.css'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
@@ -17,11 +18,13 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 // is read before anything is laid out, so scrolling to a page far down is exact.
 const PAD = 28, MIN_SCALE = 0.5, MAX_SCALE = 1.6
 
-export default function PdfViewer({ url, focus, onSelect }) {
+export default function PdfViewer({ url, focus, onSelect, onMissing }) {
   const [doc, setDoc] = useState(null)                 // { url, pdf, sizes }: sizes = [width, height] of every page, in PDF points
   const [width, setWidth] = useState(0)
   const scroller = useRef(null)
   const els = useRef({})
+  const missing = useRef(onMissing)
+  useEffect(() => { missing.current = onMissing })
 
   useEffect(() => {
     if (!url) return
@@ -35,7 +38,7 @@ export default function PdfViewer({ url, focus, onSelect }) {
         }
         if (alive) setDoc({ url, pdf: d, sizes: dims })
       })
-      .catch(() => {})
+      .catch(err => { if (alive && missing.current && isMissingPdf(err)) missing.current() })   // the file is gone: let the app forget the paper
     return () => { alive = false }
   }, [url])
 

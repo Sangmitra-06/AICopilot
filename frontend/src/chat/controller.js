@@ -24,7 +24,7 @@ export const COPY = {
   chatOff: 'Chat is switched off on this server.',
 }
 
-const KEYS = { reviewer: 'copilot.reviewer_id', paper: 'copilot.paper_id' }
+export const KEYS = { reviewer: 'copilot.reviewer_id', paper: 'copilot.paper_id' }
 
 export function memoryStorage() {
   const m = new Map()
@@ -251,5 +251,14 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
     return String(span.text)
   }
 
-  return { getState, subscribe, start, send, attach, focusCite, selectRect }
+  // The PDF of the stored paper could not be loaded because the file is gone from the server: forget the paper, go back to
+  // asking for it. A report about a paper that is no longer the current one is ignored.
+  function paperMissing(pid) {
+    if (!state.paperId || (pid && pid !== state.paperId)) return
+    storage.remove(KEYS.paper)
+    patch({ paperId: null, spans: {}, focus: null, menu: null, stage: state.stage === 'chat' ? 'attach' : state.stage })
+    say(COPY.paperGone)
+  }
+
+  return { getState, subscribe, start, send, attach, focusCite, selectRect, paperMissing }
 }

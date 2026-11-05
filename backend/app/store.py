@@ -1,4 +1,7 @@
 import sqlite3, json, os, time, threading
+from . import fresh
+
+fresh.apply()   # COPILOT_FRESH=1 (dev only): start from an empty database and data folder
 
 db = sqlite3.connect(os.environ.get("COPILOT_DB", "copilot.db"), check_same_thread=False)
 LOCK = threading.RLock()

@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { createApi } from './api.js'
+import { browserStorage } from './controller.js'
+import { syncBoot } from './boot.js'
 import { wantsGuided, flowFromConfig } from './flow.js'
 
 // Both screens load on demand, so the old flow's code and styles are only fetched when it is actually shown,
@@ -12,7 +14,8 @@ export default function Root() {
   useEffect(() => {
     if (flow) return
     let live = true
-    createApi().config().then(r => { if (live) setFlow(flowFromConfig(r)) })
+    // (dev only) a backend started with COPILOT_FRESH=1 reports a new boot id: forget the stored reviewer and paper first
+    createApi().config().then(r => { if (live) { syncBoot(browserStorage(), r); setFlow(flowFromConfig(r)) } })
     return () => { live = false }
   }, [flow])
   if (!flow) return null
