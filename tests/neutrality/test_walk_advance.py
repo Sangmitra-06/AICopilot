@@ -1,5 +1,5 @@
 """Item 3: advancing through the reading order. A per-paper pointer into the order; "ok"/"next"/"got it"/"move on" (or a
-finished captured point) moves to the next section ("Moving to the methods, as you said") and cites its spans; a covered
+finished captured point) moves to the next section ("You said you like to read the intro first and then the methods, so let's go to the methods now") and cites its spans; a covered
 section is never revisited unless asked; the end of the order offers the open review-form sections; "go to results"
 jumps and resets the pointer; "stop guiding" stops for good. All of it is app-written, none of it judges the paper.
 """
@@ -71,7 +71,7 @@ def test_a_done_signal_moves_to_the_next_section_in_the_reviewers_words_and_cite
     start(c)
     model = set_model({"reply": "should not be asked"})
     body = say(c, signal)
-    assert body["reply"].startswith("Moving to the methods, as you said") and "(Section 3)" in body["reply"]
+    assert body["reply"].startswith("You said you like to read the intro first and then the methods, so let's go to the methods now") and "(Section 3)" in body["reply"]
     assert sections_cited(body) == {"3 Method"} and body["cites"][0]["page"] == 4
     assert body["parts"] and any(p["cite"] for p in body["parts"])
     assert asked(model) == [] and pointer() == 1
@@ -81,7 +81,7 @@ def test_a_done_signal_moves_to_the_next_section_in_the_reviewers_words_and_cite
 def test_the_exact_wording_for_the_first_move(env):
     c, _ = env
     start(c, "I start with the intro and then go to methods.")
-    assert say(c, "ok")["reply"].startswith("Moving to the methods, as you said")
+    assert say(c, "ok")["reply"].startswith("You said you like to read the intro first and then the methods, so let's go to the methods now")
 
 
 def test_sections_the_reviewer_did_not_name_are_not_claimed_as_theirs(env):
@@ -216,12 +216,12 @@ def test_finishing_a_captured_point_moves_on_after_the_confirmation(env):
     start(c)
     set_model({"reply": OFFERING, "views": [{"text": "The ablation study is missing", "section": "weaknesses"}]})
     offer = say(c, "The ablation study is missing")
-    assert offer["capture"] and "Moving to" not in offer["reply"]                # an offer is not a finished point
+    assert offer["capture"] and "go to the methods" not in offer["reply"]                # an offer is not a finished point
     set_model({"reply": "Okay."})
     body = say(c, "yes")
     assert body["resolved"]["outcome"] == "accepted" and body["added"]
-    assert "Added to" in body["reply"] and "Moving to the methods, as you said" in body["reply"]
-    assert body["reply"].index("Added to") < body["reply"].index("Moving to")
+    assert "Added to" in body["reply"] and "You said you like to read the intro first and then the methods, so let's go to the methods now" in body["reply"]
+    assert body["reply"].index("Added to") < body["reply"].index("You said you like")
     assert sections_cited(body) == {"3 Method"} and pointer() == 1
     assert any(p["cite"] for p in body["parts"]) and "".join(p["text"] for p in body["parts"]) == body["reply"]
 
@@ -233,7 +233,7 @@ def test_a_rejected_capture_does_not_move_on(env):
     say(c, "The ablation study is missing")
     set_model({"reply": "Okay."})
     body = say(c, "no")
-    assert "Moving to" not in body["reply"] and pointer() == 0
+    assert "go to the methods" not in body["reply"] and pointer() == 0
 
 
 def test_ordinary_chat_during_the_walk_does_not_move_the_pointer(env):
@@ -264,7 +264,7 @@ def test_a_nudge_in_a_capture_turn_means_no_advance_on_top_of_it(env):
     set_model({"reply": "Okay. Your draft has nothing under Summary yet.", "nudge_used": True})
     store.log("p1", "section_promised", {"section": "summary"})
     body = say(c, "yes")
-    assert body["nudge"] and "Moving to" not in body["reply"] and pointer() == 0   # one prompt per turn
+    assert body["nudge"] and "go to the methods" not in body["reply"] and pointer() == 0   # one prompt per turn
 
 
 def test_the_walk_survives_a_reload(env):

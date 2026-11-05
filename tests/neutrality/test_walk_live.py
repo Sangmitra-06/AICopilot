@@ -29,7 +29,7 @@ def test_live_an_ordinary_question_during_the_walk_leaves_the_pointer_alone(chat
     make_reviewer("rev", reading_order="intro then method", reading_order__value="intro_first")
     c.post("/chat/p1/open", json={"reviewer_id": "rev"})
     body = c.post("/chat/p1", json={"reviewer_id": "rev", "message": "what does F1 measure?"}).json()
-    assert store.walk_state("p1")["pointer"] == 0 and not body["reply"].startswith("Moving to")
+    assert store.walk_state("p1")["pointer"] == 0 and "so let's go to" not in body["reply"]
     assert body["checks"]["fallback"] is False, body["reply"]
     moved = c.post("/chat/p1", json={"reviewer_id": "rev", "message": "ok"}).json()
-    assert moved["reply"].startswith("Moving to the method, as you said") and store.walk_state("p1")["pointer"] == 1
+    assert moved["reply"].startswith("You said you like to read the intro first and then the method, so let's go to the method now") and store.walk_state("p1")["pointer"] == 1

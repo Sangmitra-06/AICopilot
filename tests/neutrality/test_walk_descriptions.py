@@ -2,7 +2,7 @@
 
   * before_reading: a summary of at most three sentences, then "You said you like to start with the intro, here it is."
     plus a description of the intro.
-  * "next" (intro, then methods): "Moving to the methods, as you said." plus a description of the methods; the cites are
+  * "next" (intro, then methods): "You said you like to read the intro first and then the methods, so let's go to the methods now." plus a description of the methods; the cites are
     that section's passages, so the PDF moves there every time.
   * one pointer per sentence; a pointer that would repeat the previous sentence's is not shown twice.
   * the description goes through the normal neutrality checks; if none can be made the app's plain pointer line is shown
@@ -51,7 +51,7 @@ def test_next_shows_a_description_of_the_next_section_and_moves_the_pdf(env):
     model = set_model({"reply": METHOD})
     body = say(c, "next")
     lead, _, desc = body["reply"].partition("\n\n")
-    assert lead == "Moving to the methods, as you said."
+    assert lead == "You said you like to read the intro first and then the methods, so let's go to the methods now."
     assert "weak supervision" in desc and "(Section 3)" in desc
     assert sections_cited(body) == {"3 Method"} and body["cites"][0]["page"] == 4
     assert body["parts"] and any(p["cite"] for p in body["parts"])
@@ -119,7 +119,7 @@ def test_a_down_model_leaves_the_plain_pointer_line_for_a_step(env, monkeypatch)
         raise RuntimeError("model down")
     monkeypatch.setattr(chatflow, "_chat", boom)
     body = say(c, "next")
-    assert body["reply"].startswith("Moving to the methods, as you said (Section 3).")
+    assert body["reply"].startswith("You said you like to read the intro first and then the methods, so let's go to the methods now (Section 3).")
     assert sections_cited(body) == {"3 Method"}
 
 

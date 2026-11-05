@@ -357,17 +357,27 @@ def active(w):
 
 
 
-def move_lead(entry, kind="advance"):
-    """"Moving to the methods, as you said" (no full stop, no pointer). The reviewer's own word is used when they named the
-    part, "as you asked" after a jump, and nothing is claimed for a part they did not name."""
+def move_lead(entry, kind="advance", order=(), covered=()):
+    """The app's line for going to a section (no full stop, no pointer). A section the reviewer named in onboarding is
+    tied back to what they said: "You said you like to read the intro first and then the methods, so let's go to the
+    methods now" (the named section before it in `order`; "first" only when that one was the first they named). Nothing
+    is claimed for a part they did not name ("Moving to the abstract"). A jump is "as you asked"; "again" only for a
+    section already in `covered`."""
     x = where(entry)
     if kind == "jump":
-        return f"Going to {x}, as you asked"
-    return f"Moving to {x}{', as you said' if entry.get('said') else ''}"
-
-
-def move_line(entry, spans, n, kind="advance"):
-    return marked(move_lead(entry, kind), spans, entry["section"])
+        return f"Let's look at {x} again, as you asked" if entry["section"] in covered else f"Going to {x}, as you asked"
+    said = entry.get("said")
+    if not said:
+        return f"Moving to {x}"
+    named = [e for e in order if e.get("said")]
+    at = next((k for k, e in enumerate(named) if e["section"] == entry["section"]), None)
+    before = named[at - 1] if at else None
+    if before and before["said"] == said:                      # two sections for one word: do not say it twice
+        return f"Still on {the(said)} you mentioned, let's go to {title_phrase(entry['section'])} now"
+    if before:
+        first = " first" if named.index(before) == 0 else ""
+        return f"You said you like to read {the(before['said'])}{first} and then {x}, so let's go to {x} now"
+    return f"You said you like to read {x}, so let's go to {x} now"
 
 
 STOPPED = "Okay, I'll stop guiding. Ask for anything you want from here, and I'll follow."

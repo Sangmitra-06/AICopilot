@@ -518,7 +518,7 @@ def walk_turn(pid, spans, message, w, ruled, variant, view):
 
     def moved(i, kind, entry):
         store.log(pid, "walk_at", {"index": i, "section": entry["section"], "reason": kind})
-        m = section_message(pid, view, spans, entry, walk.move_lead(entry, kind))
+        m = section_message(pid, view, spans, entry, walk.move_lead(entry, kind, order, w["covered"]))
         return {"reply": m["reply"], "parts": m["parts"], "cites": m["cites"],
                 "walk": {"kind": kind, "section": entry["section"]}}
 
@@ -551,7 +551,7 @@ def move_on_after_capture(pid, spans, w, out, meta, view):
         return
     entry = w["order"][i]
     store.log(pid, "walk_at", {"index": i, "section": entry["section"], "reason": "capture"})
-    m = section_message(pid, view, spans, entry, walk.move_lead(entry))
+    m = section_message(pid, view, spans, entry, walk.move_lead(entry, order=w["order"], covered=w["covered"]))
     shown, parts, found = m["reply"], m["parts"], m["cites"]
     before = out["reply"]
     base = out["parts"] or [{"text": before, "cite": None}]
