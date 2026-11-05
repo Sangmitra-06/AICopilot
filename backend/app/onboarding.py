@@ -164,7 +164,17 @@ _COMMON = ("paper claim result experiment baseline method approach novel clear c
            "constructive specific actionable fair balanc feedback author score scor accept reject decision criteria "
            "standard bias subjectiv "
            "gut feel instinct intuit impression mostly usually tend depend generally overall sense hunch vibe seem "
-           "trust think believe matter care bother annoy system process checklist habit routine rule").split()
+           "trust think believe matter care bother annoy system process checklist habit routine rule "
+           # how people describe a good or bad review / paper in a few plain words ("very descriptive and precise")
+           "descript precis accura concis honest direct organi detail thought careful respect polit balanc insight "
+           "concrete example reason justif explain suggest help actionab useful convinc persua coheren logic thorough "
+           "objectiv consisten transparen rigor reproduc notation typo wording phrase tone harsh rude sarcas dismiss "
+           "short brief long vague generic lazy superficial specific substan comment critic praise feedback improv "
+           "structur story motivat contex setup number statist signific compar oversell overclaim exaggerat "
+           "fair unfair biased page citation cite refer sloppy messy typo grammar english readab understand "
+           "stateme argum quality effort time energy decid judg opinion read note summar skim "
+           "reviewer meta chair rebuttal response "
+           "good bad hard easy difficult tough struggl know mind act").split()
 _EXTRA = {
     "hardest_part": "time deadline start structur organi wording harsh confiden length summar decid commit".split(),
     "over_under_penalize": "typo english language grammar novelty length format notation presentation polish".split(),
