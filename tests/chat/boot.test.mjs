@@ -58,11 +58,17 @@ test('what counts as a missing PDF', () => {
   assert.equal(isMissingPdf(null), false)
 })
 
-test('a missing PDF clears the stored paper id, goes back to attach and says so', () => {
+test('a missing PDF while working on it after onboarding clears the stored paper id, goes back to attach and says so', async () => {
   const s = memoryStorage(); s.set('copilot.reviewer_id', 'r1'); s.set('copilot.paper_id', 'p1')
-  const c = createController({ api: {}, storage: s })
+  const ok = data => ({ ok: true, status: 200, data })
+  const api = { onboarding: async () => ok({ done: true }), thread: async () => ok([]), spans: async () => ok([]),
+    open: async () => ok({ opened: false, messages: [] }) }
+  const c = createController({ api, storage: s })
+  await c.start()
+  assert.equal(c.getState().stage, 'chat')
   assert.equal(c.getState().paperId, 'p1')
   c.paperMissing('p1')
+  assert.equal(c.getState().stage, 'attach')
   assert.equal(s.get('copilot.paper_id'), null)
   assert.equal(c.getState().paperId, null)
   assert.equal(c.getState().focus, null)
@@ -76,4 +82,38 @@ test('a missing PDF for a paper that is no longer the current one is ignored', (
   c.paperMissing('p1')
   assert.equal(c.getState().paperId, 'p2')
   assert.equal(s.get('copilot.paper_id'), 'p2')
+})
+
+// The real session: a stale paper id was still stored when onboarding started. The PDF pane tried to load it, the
+// file was gone, and the first thing in the thread was "I can't find that paper any more. Attach it again."
+test('a stale paper id at the start of onboarding is cleared silently', async () => {
+  const s = memoryStorage(); s.set('copilot.reviewer_id', 'r-80a6'); s.set('copilot.paper_id', 'stale-pid')
+  const first = 'To start, roughly how many papers have you reviewed before? A number is fine, and zero is a fine answer.'
+  const api = { onboarding: async () => ({ ok: true, status: 200, data: { done: false, field: 'papers_reviewed', question: first } }) }
+  const c = createController({ api, storage: s })
+  c.paperMissing('stale-pid')                   // the PDF pane can report before the first question arrives...
+  await c.start()
+  c.paperMissing('stale-pid')                   // ...or after it
+  assert.equal(s.get('copilot.paper_id'), null)
+  assert.equal(c.getState().paperId, null)
+  assert.equal(c.getState().stage, 'onboarding')
+  assert.deepEqual(c.getState().messages.map(m => m.text), [first])
+})
+
+test('a stale paper id found while onboarding is under way is cleared silently', () => {
+  const s = memoryStorage(); s.set('copilot.paper_id', 'p1')
+  const c = createController({ api: {}, storage: s })
+  c.paperMissing('p1')                          // stage is still "boot"
+  assert.equal(c.getState().paperId, null)
+  assert.equal(c.getState().messages.length, 0)
+})
+
+test('a reload after onboarding whose PDF is gone before the onboarding status arrives still says so', async () => {
+  const s = memoryStorage(); s.set('copilot.reviewer_id', 'r1'); s.set('copilot.paper_id', 'p1')
+  const c = createController({ api: { onboarding: async () => ({ ok: true, status: 200, data: { done: true } }) }, storage: s })
+  c.paperMissing('p1')                          // stage "boot": not known yet whether they were working on it
+  assert.equal(c.getState().messages.length, 0)
+  await c.start()
+  assert.equal(c.getState().stage, 'attach')
+  assert.deepEqual(c.getState().messages.map(m => m.text), [COPY.paperGone])
 })

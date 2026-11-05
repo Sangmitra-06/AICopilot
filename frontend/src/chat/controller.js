@@ -51,6 +51,7 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
   if (!reviewerId) { reviewerId = mint(); storage.set(KEYS.reviewer, reviewerId) }
   let seq = 0
   let starting = false
+  let lostAtBoot = false               // the stored paper's PDF was gone before we knew whether onboarding had closed
   let state = {
     stage: 'boot', messages: [], busy: false, menu: null, draftVersion: 0,
     spans: {}, focus: null,            // spans by id (page and box), and the one set of spans the PDF is showing
@@ -144,9 +145,11 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
       const r = await api.onboarding(state.reviewerId)
       if (!r.ok || !r.data) { fail(COPY.unreachable); patch({ stage: 'boot' }); return }
       if (r.data.done) {
-        if (state.paperId) { patch({ stage: 'chat', menu: null }); await loadHistory(); await loadSpans(); await openPaper() }
+        if (lostAtBoot && !state.paperId) { lostAtBoot = false; patch({ stage: 'attach', menu: null }); say(COPY.paperGone) }
+        else if (state.paperId) { patch({ stage: 'chat', menu: null }); await loadHistory(); await loadSpans(); await openPaper() }
         else await closeOnboarding()
       } else {
+        lostAtBoot = false
         showStep(r.data)
       }
     } finally {
@@ -251,13 +254,16 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
     return String(span.text)
   }
 
-  // The PDF of the stored paper could not be loaded because the file is gone from the server: forget the paper, go back to
-  // asking for it. A report about a paper that is no longer the current one is ignored.
+  // The PDF of the stored paper could not be loaded because the file is gone from the server: forget the paper. Only a
+  // reviewer who was already working on it after onboarding (stage "chat", or a reload whose onboarding turns out to be
+  // closed) is told and asked for it again; a stale id found during onboarding is cleared silently. A report about a paper that is not the current one is ignored.
   function paperMissing(pid) {
     if (!state.paperId || (pid && pid !== state.paperId)) return
+    const working = state.stage === 'chat'
+    if (state.stage === 'boot') lostAtBoot = true     // decided once start() knows whether onboarding had closed
     storage.remove(KEYS.paper)
-    patch({ paperId: null, spans: {}, focus: null, menu: null, stage: state.stage === 'chat' ? 'attach' : state.stage })
-    say(COPY.paperGone)
+    patch({ paperId: null, spans: {}, focus: null, ...(working ? { menu: null, stage: 'attach' } : {}) })
+    if (working) say(COPY.paperGone)
   }
 
   return { getState, subscribe, start, send, attach, focusCite, selectRect, paperMissing }
