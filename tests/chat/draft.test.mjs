@@ -114,3 +114,29 @@ test('ids are encoded into paths and events carry the paper id', async () => {
   assert.equal(seen[0][0], 'http://x/onboarding/a%20b%2Fc')
   assert.deepEqual(JSON.parse(seen[1][1].body), { paper_id: 'p1', type: 'note_removed', payload: { id: 3 } })
 })
+
+// Item 4: a note accepted AFTER "draft it" must show in the panel (it used to be hidden behind the generated sentences).
+test('a note added after the draft was made shows below the generated sentences of its section', () => {
+  const draft = { summary: { sentences: [{ text: 'The paper probes syntax.', src: ['n1'] }] } }
+  const s = buildSections(CRIT, [note(1, 'summary', 'The paper probes syntax'), note(2, 'summary', 'It adds a dataset')], draft)
+  assert.deepEqual(s[0].items.map(i => [i.kind, i.text]), [['sentence', 'The paper probes syntax.'], ['note', 'It adds a dataset']])
+  assert.equal(copyText(s), 'Paper summary\nThe paper probes syntax.\n\nIt adds a dataset')
+})
+
+test('a note the generated sentences already carry is not shown twice', () => {
+  const draft = { summary: { sentences: [{ text: 'One and two.', src: ['n1', 'n2'] }] } }
+  const s = buildSections(CRIT, [note(1, 'summary', 'one'), note(2, 'summary', 'two')], draft)
+  assert.deepEqual(s[0].items.map(i => i.kind), ['sentence'])
+})
+
+test('a generated draft with no record of its sources keeps hiding the notes (never shows a note twice)', () => {
+  const draft = { summary: { sentences: [{ text: 'Old draft.' }] } }
+  const s = buildSections(CRIT, [note(1, 'summary', 'one')], draft)
+  assert.deepEqual(s[0].items.map(i => i.kind), ['sentence'])
+})
+
+test('a legacy-field note added after the draft also shows', () => {
+  const draft = { weaknesses: { sentences: [{ text: 'Generated.', src: ['n1'] }] } }
+  const s = buildSections(CRIT, [note(1, 'W', 'first'), note(2, 'W', 'second')], draft)
+  assert.deepEqual(s[2].items.map(i => i.text), ['Generated.', 'second'])
+})

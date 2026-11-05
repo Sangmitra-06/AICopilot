@@ -1,7 +1,7 @@
 // The review draft as the side panel shows it: by review-form section, each section a list of editable paragraphs.
 // Free of React so it can be tested. A paragraph is either one of the reviewer's notes (captured in chat) or one
 // sentence of a generated draft ("draft it"); a section shows the generated sentences once there are any,
-// otherwise its notes.
+// otherwise its notes (plus any note added since the draft was made).
 
 export const LEGACY = { P: 'summary', S: 'strengths', W: 'weaknesses', Q: 'comments' }
 export const UNPLACED = { id: '', name: 'Not placed in a section yet' }
@@ -16,9 +16,15 @@ export function buildSections(criteria, notes, draft) {
     const sentences = gen
       .map((s, idx) => ({ kind: 'sentence', field: f.id, idx, text: String(s.text || '') }))
       .filter(i => i.text.trim())
+    const own = live.filter(n => fieldOf(n) === f.id).map(n => ({ kind: 'note', id: n.id, text: String(n.text) }))
+    // A section shows its generated sentences once there are any. A note the reviewer added AFTER the draft was made is
+    // not in them (the sentences list the notes they were made from, in `src`), so it is shown after them: nothing the
+    // app said it added is ever hidden. A draft with no record of its sources keeps hiding the notes (never twice).
+    const known = gen.every(s => Array.isArray(s.src))
+    const used = new Set(gen.flatMap(s => s.src || []))
     const mine = sentences.length
-      ? sentences
-      : live.filter(n => fieldOf(n) === f.id).map(n => ({ kind: 'note', id: n.id, text: String(n.text) }))
+      ? [...sentences, ...(known ? own.filter(n => !used.has('n' + n.id)) : [])]
+      : own
     return { ...f, items: mine }
   })
   const loose = live.filter(n => !ids.has(fieldOf(n))).map(n => ({ kind: 'note', id: n.id, text: String(n.text) }))
