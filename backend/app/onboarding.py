@@ -224,7 +224,7 @@ NUMWORDS = {"zero": 0, "none": 0, "no": 0, "one": 1, "two": 2, "three": 3, "four
             "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15,
             "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "couple": 2, "few": 3, "several": 5,
             "dozen": 12, "dozens": 24, "many": 20, "lots": 20, "loads": 20, "countless": 30, "a lot": 20, "plenty": 20,
-            "tons": 30}
+            "tons": 30, "handful": 5, "hundreds": 30}
 _NUM = r"(\d{1,3}|" + "|".join(sorted(NUMWORDS, key=len, reverse=True)) + r")"
 # Inside a longer sentence "no" and "none" are not counts ("I see no papers on this").
 _NUM_IN_TEXT = r"(\d{1,3}|" + "|".join(sorted(set(NUMWORDS) - {"no", "none"}, key=len, reverse=True)) + r")"
@@ -249,6 +249,9 @@ def x_papers(text, direct):
     if m:
         return _num(m.group(1))
     if direct:
+        if re.fullmatch(r"\W*(?:never|not once|never before)\W*", t, re.I) or (
+                len(t.split()) <= 8 and re.search(r"\b(?:new|beginner|novice|newbie)\b", t, re.I)):
+            return 0
         m = re.fullmatch(r"\W*(?:about |around |roughly |maybe |like |~)?" + _NUM + r"(?: or so| times)?\W*", t, re.I)
         if m:
             return _num(m.group(1))
@@ -269,16 +272,18 @@ def x_subarea(text, direct):
                  r"never worked|unfamiliar|not (?:very |really |that )?familiar|no background|a stranger|don'?t (?:really )?know (?:this|the) (?:area|field)|"
                  r"(?:completely|totally|entirely|brand|pretty|quite|fairly|very|really) new|new here|first time (?:in|with|seeing|reading)|"
                  r"never (?:seen|read|touched|done)|out of my (?:area|depth|wheelhouse|field)|\b(?:beginner|novice|newbie)\b|"
-                 r"don'?t know (?:much|anything|it|this)", t):
+                 r"don'?t know (?:much|anything|it|this)", t) or (
+            direct and re.search(r"\bnew\b|^\W*not at all\W*$|\b(?:barely|hardly)\b", t)):
         return "unfamiliar"
     if re.search(r"somewhat|a bit|a little|some (?:familiarity|background|experience)|adjacent|related (?:area|field)|"
                  r"know the basics|read about|moderately|partly|fairly familiar|kind of|sort of|so-?so|know (?:it|this|the area) "
-                 r"(?:okay|ok|reasonably|decently)|intermediate", t):
+                 r"(?:okay|ok|reasonably|decently)|intermediate|fair bit|decent|moderate", t):
         return "some"
     if re.search(r"i (?:work|publish|do research|study|write papers) (?:in|on)|my (?:main |own )?(?:area|field|subarea|specialty)|"
                  r"expert|very familiar|deeply|close to my|familiar|"
                  r"know (?:it|this|that|the (?:area|field|topic|subject)|this (?:area|field|topic)|the material)(?: \w+){0,2} well|"
-                 r"well[- ]versed|work on (?:this|exactly)|comfortable with (?:it|this)", t):
+                 r"well[- ]versed|work on (?:this|exactly)|comfortable with (?:it|this)|"
+                 r"(?:worked|working) (?:on|in) (?:it|this)|for (?:many |several |a few )?years|\d+ years", t):
         return "familiar"
     return None
 
@@ -327,7 +332,16 @@ def x_workflow(text, direct):
         return "collaborative"
     if direct and re.fullmatch(r"\W*(alone|solo|myself|first)\W*", text, re.I):
         return "read_first"
+    if direct and re.search(r"\b(?:talk(?:ing)?|chat(?:ting)?|discuss(?:ing)?|together|you and me|collaborative|step by step|"
+                            r"section by section)\b", text, re.I):
+        return "collaborative"
     return None
+
+
+_SUM_BEFORE = r"\b(?:before|beforehand|first|up ?front|ahead of|prior to|in advance|at the start)\b"
+_SUM_AFTER = r"\b(?:after|afterwards?|later|at the end|once i|when i(?:'m| am)? (?:done|finished))\b"
+_SUM_NONE = re.compile(r"^\W*(?:no|nope|nah|never)\W*$|\b(?:not at all|no thanks|no thank you|never|no need|no summary|"
+                       r"(?:don'?t|do not) (?:need|want)|without (?:one|a summary)|rather not)\b")
 
 
 def x_summary(text, direct):
@@ -344,10 +358,17 @@ def x_summary(text, direct):
     if re.search(r"summar\w*[^.]{0,30}\bbefore\b|before[^.]{0,30}(?:read|summar)|summary first|up ?front|beforehand|"
                  r"start with a summary|summary before", t):
         return "before_reading"
-    if direct and re.fullmatch(r"\W*(before|first|upfront|up front)\W*", t):
-        return "before_reading"
-    if direct and re.fullmatch(r"\W*(after|later|afterwards|at the end)\W*", t):
-        return "after_reading"
+    if direct:  # the text answers this very question: read the cue words, ignoring the words around them
+        if re.search(r"\bnot (?:before|first|up ?front)\b", t):
+            return "after_reading"
+        if re.search(r"\bnot after\b", t):
+            return "before_reading"
+        hits = [(m.start(), val) for val, pat in
+                (("before_reading", _SUM_BEFORE), ("after_reading", _SUM_AFTER)) for m in [re.search(pat, t)] if m]
+        if hits:
+            return min(hits)[1]
+        if _SUM_NONE.search(t):
+            return "none"
     return None
 
 
@@ -360,7 +381,14 @@ def x_notes(text, direct):
             ("annotate_pdf", r"annotat|highlight|margin|comments? (?:in|on) the pdf|\bpdf\b|zotero|mark(?:ing)? up"),
             ("separate_doc", r"notion|obsidian|evernote|google docs?|\bword\b|\bdoc\b|text file|notes app|apple notes|onenote|spreadsheet|markdown|separate (?:file|doc)|laptop|typed|bullet")]
     hits = [(m.start(), val) for val, pat in pats for m in [re.search(pat, t)] if m]
-    return min(hits)[1] if hits else None
+    if hits:
+        return min(hits)[1]
+    if direct:  # a bare noun is an answer too: "paper", "head"
+        for val, pat in (("in_head", r"\b(?:head|memory|mind|brain)\b"), ("handwritten", r"\bpaper\b"),
+                         ("separate_doc", r"\b(?:docs?|documents?|files?|computer|digital)\b")):
+            if re.search(pat, t):
+                return val
+    return None
 
 
 EXTRACT = {"papers_reviewed": x_papers, "subarea_familiarity": x_subarea, "reading_order": x_reading,
