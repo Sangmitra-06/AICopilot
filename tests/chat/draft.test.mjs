@@ -167,3 +167,24 @@ test('a note the app drafted from the paper\'s claims carries that label in the 
   assert.equal(sections.find(x => x.id === 'strengths').items[0].label, undefined)    // the reviewer's own words: no label
   assert.ok(!copyText(sections).includes('Drafted from'))
 })
+
+// Demo packaging: the chat frontend calls the API on its own origin (no hard-coded host), and an upload carries the
+// reviewer id so the paper id is per reviewer and per paper.
+test('by default the client calls the API on the page origin (relative paths)', async () => {
+  const seen = []
+  const api = createApi(async url => { seen.push(url); return resp(200, {}) })
+  await api.config()
+  await api.chat('p1', 'rev', 'hi')
+  assert.deepEqual(seen, ['/config', '/chat/p1'])
+  assert.equal(api.pdfUrl('p1'), '/papers/p1/pdf')
+})
+
+test('an upload sends the reviewer id with the file', async () => {
+  const seen = []
+  const api = createApi(async (url, init) => { seen.push([url, init]); return resp(200, { paper_id: 'x' }) })
+  await api.upload({ name: 'a.pdf' }, 'rev 1')
+  await api.upload({ name: 'a.pdf' })
+  assert.equal(seen[0][0], '/papers?reviewer_id=rev%201')
+  assert.equal(seen[1][0], '/papers')
+  assert.equal(seen[0][1].method, 'POST')
+})

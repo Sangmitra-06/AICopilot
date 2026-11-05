@@ -223,7 +223,7 @@ export function createController({ api, storage = memoryStorage(), mint = mintRe
     dropErrors()
     patch({ busy: true })
     try {
-      const r = await api.upload(file)
+      const r = await api.upload(file, state.reviewerId)
       const pid = r.ok && r.data && r.data.paper_id
       if (!pid) { fail(COPY.uploadFailed); return }
       const stage = state.stage

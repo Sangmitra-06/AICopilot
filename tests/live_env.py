@@ -11,6 +11,14 @@ import pathlib
 ENV_FILE = pathlib.Path(__file__).resolve().parents[1] / "backend" / ".env"
 DUMMY_KEY, DUMMY_MODEL = "test-key", "test-model"
 SHELL_KEY, SHELL_MODEL = os.environ.get("OPENROUTER_API_KEY"), os.environ.get("MODEL")
+RUN_LIVE = os.environ.get("RUN_LIVE")   # tests/conftest.py stores the shell's value here and drops it from os.environ
+
+
+def live_requested(markexpr, run_live=None):
+    """Live tests run only when BOTH are asked for: RUN_LIVE=1 in the shell and `-m live` on the command line. A shell
+    that happens to have RUN_LIVE=1 set never turns them on in the default run."""
+    run_live = RUN_LIVE if run_live is None else run_live
+    return run_live == "1" and "live" in (markexpr or "") and "not live" not in (markexpr or "")
 
 
 def live_credentials():

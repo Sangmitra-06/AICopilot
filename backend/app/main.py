@@ -1,15 +1,16 @@
-import base64, hashlib, logging, os
+import base64, hashlib, logging, os, pathlib
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import pymupdf
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import re
 from contextlib import asynccontextmanager
 from . import fresh, ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper, onboarding, venue, chatflow
-from . import brief as brief_mod, walk as walk_mod
+from . import brief as brief_mod, walk as walk_mod, demo
 from . import guide as guide_mod
 
 
@@ -25,6 +26,7 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware,
                    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
                    allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(demo.Gate)   # DEMO_PASSWORD set: everything (API, PDF, frontend) needs it once (basic auth)
 CACHE = {}
 MAXP = int(os.environ.get("MAXP", "8"))
 DATA_DIR = os.environ.get("COPILOT_DATA_DIR", "data")
@@ -94,10 +96,22 @@ class Verify(BaseModel): paper_id: str; keys: Optional[list[str]] = None; force:
 class Dispute(BaseModel): paper_id: str; key: str; reason: str
 
 
+def paper_id(data, reviewer_id=None):
+    """The id a PDF is stored and logged under. With a reviewer id (the chat-first frontend sends one) it is per reviewer
+    AND per paper, so two people with the same PDF each get their own opening, walk, thread, notes and draft; the same
+    person uploading the same file again gets the same id. Without one (the old guided flow) it is the file's hash."""
+    h = hashlib.sha1(data)
+    if reviewer_id:
+        h.update(b"|reviewer:" + reviewer_id.encode("utf-8"))
+    return h.hexdigest()[:10]
+
+
 @app.post("/papers")
-async def upload(file: UploadFile):
+async def upload(file: UploadFile, reviewer_id: Optional[str] = None):
+    if reviewer_id is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", reviewer_id):
+        raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
     data = await file.read()
-    pid = hashlib.sha1(data).hexdigest()[:10]
+    pid = paper_id(data, reviewer_id)
     os.makedirs(DATA_DIR, exist_ok=True)
     open(f"{DATA_DIR}/{pid}.pdf", "wb").write(data)
     return {"paper_id": pid, "sections": list(dict.fromkeys(s["section"] for s in spans_of(pid)))}
@@ -512,7 +526,16 @@ def chat_ep(pid: str, r: ChatReq):
         raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
     if not have_paper(pid):
         raise HTTPException(404, "unknown paper")
+    if not demo.take("chat"):                             # MAX_CHAT_CALLS_PER_DAY reached: a plain line, no model call
+        return limited_reply()
     return chatflow.turn(pid, r.reviewer_id, r.message, spans_of(pid))
+
+
+def limited_reply():
+    """The shape of a chat reply, carrying only the daily-limit message. Nothing is logged to the thread."""
+    return {"mode": "chat", "reply": demo.LIMIT_MESSAGE, "capture": None, "resolved": None, "reword": None,
+            "conflicts": [], "gaps": None, "drafted": None, "nudge": None, "cites": [], "parts": None, "added": None,
+            "walk": None, "draft_changed": False, "limited": True}
 
 
 class OpenReq(BaseModel): reviewer_id: str
@@ -528,6 +551,10 @@ def chat_open_ep(pid: str, r: OpenReq):
         raise HTTPException(400, "reviewer id must be 1-64 letters, digits, - or _")
     if not have_paper(pid):
         raise HTTPException(404, "unknown paper")
+    # Only an opening that will really be made counts as a chat call (a reload, or onboarding still open, makes none).
+    if store.onboarding(r.reviewer_id)["closed"] and not store.walk_state(pid)["opened"] and not demo.take("open"):
+        return {"opened": False, "reason": "limit",
+                "messages": [{"kind": "limit", "reply": demo.LIMIT_MESSAGE, "parts": None, "cites": []}]}
     return chatflow.open_turn(pid, r.reviewer_id, spans_of(pid))
 
 
@@ -558,3 +585,22 @@ def help_plan(r: Plan):
     out = helper.plan(c["name"], r.text, walk(r.paper_id))
     store.log(r.paper_id, "plan", {"criterion": r.criterion, **out})
     return out
+
+
+# ------------------------------------------------------------------ the built frontend, same origin as the API
+# Mounted last, so every API route above wins. Only if frontend/dist was built (npm run build); COPILOT_FRONTEND_DIST
+# points elsewhere if needed. The chat frontend calls the API on its own origin, so one process and one port serve both.
+FRONTEND_DIST = pathlib.Path(os.environ.get("COPILOT_FRONTEND_DIST")
+                             or pathlib.Path(__file__).resolve().parents[2] / "frontend" / "dist")
+
+
+def mount_frontend(target, dist):
+    """Serve the built frontend at / on `target`, after its API routes. False (nothing mounted) if it was not built."""
+    dist = pathlib.Path(dist)
+    if not (dist / "index.html").is_file():
+        return False
+    target.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
+    return True
+
+
+FRONTEND_SERVED = mount_frontend(app, FRONTEND_DIST)

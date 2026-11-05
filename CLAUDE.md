@@ -218,6 +218,18 @@ reference per turn, never the same one twice in a row.
   reviewer id and paper id when a boot id differs from the stored one. `GET /papers/{pid}/pdf` is a 404 (not a 500) when the
   file is missing, and `PdfViewer` (`onMissing`, `pdf/missing.js`) then makes the controller forget the paper id
   (`controller.paperMissing`: back to "attach", "I can't find that paper any more").
+- Demo packaging (DEMO.md): one process serves both. `main.mount_frontend` mounts `frontend/dist` (or
+  `COPILOT_FRONTEND_DIST`) at `/` AFTER every API route, only if it was built. `chat/api.js` uses `API_BASE = ''` (same
+  origin); `vite.config.js` forwards the API paths to :8000 for `npm run dev` and `vite preview` (the e2e scripts). The old
+  flow's `App.jsx` still hard-codes 127.0.0.1:8000 (not modified), so `?mode=guided` does not work through a tunnel.
+  `demo.py`: `DEMO_PASSWORD` set -> `demo.Gate` (ASGI middleware) requires HTTP basic auth (any user name, constant-time
+  compare, never logged) on every request; `MAX_CHAT_CALLS_PER_DAY` (default 500, per UTC day, counted as `chat_call`
+  events under the key `usage:<date>`, so a restart keeps the count) -> `POST /chat/{pid}` returns `demo.LIMIT_MESSAGE`
+  as a normal reply (`limited: true`, nothing logged, no model call) and an opening that would really be made returns it
+  as its one message (`reason: "limit"`, not marked opened). Onboarding answers (`/onboarding/*`) are not counted.
+  Paper ids: `POST /papers?reviewer_id=...` (the chat frontend always sends it) stores the PDF under
+  `main.paper_id(data, rid)`, so every pid-keyed state (opening, walk, thread, notes, draft) is per reviewer AND per paper;
+  without a reviewer id (old flow) the id is the file hash as before.
 - Flow toggle: `COPILOT_FLOW=chat` (default) or `guided` (turns `/chat` off with a 409);
   `GET /config` reports it. The old guided flow's endpoints and source files are unchanged;
   the frontend keeps it behind `?mode=guided`.
@@ -252,21 +264,24 @@ reports today; update them when they change.
 
 1. **Python** (all backend tests, including the old-flow Python loop tests):
    `.\.venv\Scripts\python.exe -m pytest`
-   -> 2185 passed, 11 skipped (2196 collected). The 11 skipped are the 10 `live` tests (item 5) and the
+   -> 2206 passed, 11 skipped (2217 collected). The 11 skipped are the 10 `live` tests (item 5) and the
    opt-in real-PDF walk test (set WALK_REAL_PDF to a local PDF, never committed); any
-   other live model call must fail loudly. (If RUN_LIVE=1 is set in your shell the 10 run too.)
-   Unset COPILOT_FRESH in the shell first: with it set, 3 /config and old-flow tests fail. HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
+   other live model call must fail loudly. The suite ignores the caller's shell (tests/conftest.py): COPILOT_DB and
+   COPILOT_DATA_DIR always go to a temp folder; COPILOT_FRESH, COPILOT_FLOW, DEMO_PASSWORD, COPILOT_FRONTEND_DIST and
+   RUN_LIVE are dropped; MAX_CHAT_CALLS_PER_DAY is set high. Live tests run only with RUN_LIVE=1 AND `-m live`. HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
    tests/conftest.py points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
 2. **Old-flow loop tests** (node):
    `node --test tests/loops/*.test.mjs`
    -> 12 tests.
 3. **Chat-first frontend tests** (node):
    `node --test tests/chat/*.test.mjs`
-   -> 181 tests: controller, API client, draft model, flow switch, criteria chips, citations to
+   -> 183 tests: controller, API client, draft model, flow switch, criteria chips, citations to
    highlights (`cites.test.mjs`), the opening turn (`opening.test.mjs`), message formatting
    (`format.test.mjs`), the browser scripts' skip logic, and a render test that loads the
    real components through Vite's SSR loader and lists every control on screen (PDF pane included).
-   Both node suites together: `node --test tests/loops/*.test.mjs tests/chat/*.test.mjs` -> 193.
+   Both node suites together: `node --test tests/loops/*.test.mjs tests/chat/*.test.mjs` -> 195. Run them from
+   PowerShell (from Git Bash the glob run has hung). `render`/`format` tests embed Vite in middleware mode, so the dev
+   proxy in vite.config.js is a plugin that stays off there.
 4. **Frontend build** (run in frontend/): `npm run build`. Optional lint of the chat code, also
    in frontend/: `npx oxlint src/chat src/main.jsx src/pdf` (should print nothing).
 5. **Live-model tests** (not in the default run; real model calls with the real key):

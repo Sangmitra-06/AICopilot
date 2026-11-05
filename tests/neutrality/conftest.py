@@ -1,7 +1,7 @@
 """Helpers for the neutrality tests.
 
 Offline tests mock the model through `model_says`. Tests marked `live` use the real
-model; they are skipped unless RUN_LIVE=1 and are the only tests allowed past the
+model; they are skipped unless RUN_LIVE=1 and `-m live` are both given, and are the only tests allowed past the
 network block in tests/conftest.py.
 """
 import json
@@ -15,13 +15,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "loops"))  
 
 
 def pytest_collection_modifyitems(config, items):
-    from live_env import live_credentials, live_skip_reason
-    if os.environ.get("RUN_LIVE") == "1":
+    from live_env import live_credentials, live_requested, live_skip_reason
+    if live_requested(config.getoption("markexpr", "")):
         reason = live_skip_reason(*live_credentials())
         if not reason:
             return
     else:
-        reason = "live-model test; set RUN_LIVE=1 to run"
+        reason = "live-model test; run with RUN_LIVE=1 and -m live"
     skip = pytest.mark.skip(reason=reason)
     for it in items:
         if "live" in it.keywords:

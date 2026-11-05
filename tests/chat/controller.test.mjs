@@ -185,6 +185,7 @@ test('attaching the paper switches the thread to chat, and the next message goes
   assert.equal(c.getState().paperId, 'p9')
   assert.equal(storage.get('copilot.paper_id'), 'p9')
   assert.equal(texts(c).at(-1), 'a:' + COPY.gotPaper)
+  assert.equal(calls.find(x => x[0] === 'upload')[2], 'r-test')          // the paper id is per reviewer and per paper
   await c.send('which datasets?')
   assert.deepEqual(calls.at(-1), ['chat', 'p9', 'r-test', 'which datasets?'])
   assert.deepEqual(texts(c).slice(-2), ['u:which datasets?', 'a:Table 2 reports accuracy.'])
