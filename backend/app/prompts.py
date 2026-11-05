@@ -18,13 +18,45 @@ If asked directly ("is this novel?", "do you agree?", "should I accept?", etc.),
 # the PROFILE block, and the assembly of one turn's prompt.
 
 PROFILE_LINES = [
+    ("reading_order", "How they read a paper"),
+    ("workflow_mode", "How they want to work with you"),
+    ("summary_preference", "What they said about summaries"),
     ("strength_criteria", "What counts as a strength for them"),
     ("weakness_criteria", "What counts as a weakness for them"),
     ("hardest_part", "What is hardest about reviewing, in their words"),
-    ("reading_order", "How they read a paper"),
     ("note_habit", "How they keep notes"),
-    ("summary_preference", "What they said about summaries"),
+    ("bad_review_traits", "What makes a review bad, in their words"),
+    ("excellent_review_example", "What made a review excellent, in their words"),
 ]
+
+# How each stated field steers the conversation. Only the rules for fields the reviewer stated are shown.
+PROFILE_USES = {
+    "reading_order": "Their reading order decides where the conversation goes next: the app takes them through the paper "
+                     "in that order and says so in their words. Follow the same order when you suggest what to look at.",
+    "workflow_mode": "Their way of working sets the pace (see PACE below).",
+    "summary_preference": "Their summary preference decides whether and when a summary appears (see SUMMARY RULE below).",
+    "strength_criteria": "Their strength criteria are their lens: a light prompt may ask them to look at a part of the "
+                         "paper with those words in mind. Never say whether the paper meets them.",
+    "weakness_criteria": "Their weakness criteria are their lens in the same way. Never say whether the paper falls short.",
+    "hardest_part": "Offer extra help where they said reviewing is hardest for them.",
+    "note_habit": "Suggest capturing things the way they keep notes (in the PDF: mark the passage; otherwise: tell you, "
+                  "and the app saves it in their words).",
+    "bad_review_traits": "These are reminders for THEIR DRAFT when they ask for a check (for example, points that repeat "
+                         "each other), never a comment on the paper.",
+    "excellent_review_example": "When helping them phrase their comments, aim for what they said made a review excellent.",
+}
+PACE = {
+    "collaborative": "PACE: they want to work through the paper together. Lead step by step, one light prompt at a time.",
+    "read_first": "PACE: they want to read on their own first. Wait and answer what they ask; do not lead, do not nudge, "
+                  "and do not volunteer prompts.",
+}
+LEVEL = {
+    "low": "HOW MUCH TO EXPLAIN: explain terms, methods and metrics briefly when they come up, and go section by section.",
+    "medium": "HOW MUCH TO EXPLAIN: explain a term when they ask or when it is unusual.",
+    "high": "HOW MUCH TO EXPLAIN: do not explain standard concepts unless asked; keep replies short.",
+}
+BREVITY = ("They said time is the hard part: keep replies short, and when they ask what is left, a quick checklist of "
+           "the open review sections beats a long explanation.")
 
 SUMMARY_RULES = {
     "after_reading": "The reviewer wants a summary only after they have read the paper. Do not volunteer a summary or an overview of the paper. Give one when they ask for it.",
@@ -33,19 +65,32 @@ SUMMARY_RULES = {
     "none": "The reviewer does not want summaries. Do not volunteer one; if they ask for one outright, give it.",
 }
 SUMMARY_RULE_DEFAULT = "Give a summary only when the reviewer asks for one. Do not volunteer one."
+SUMMARY_GIVEN = ("The summary they asked for before reading was already given at the start of this conversation. Do "
+                 "not offer another one; give a summary again only if they ask for it outright.")
 
 
-def profile_block(phrases, summary_preference=None):
-    """The PROFILE block. `phrases` maps a profile field to the reviewer's own words (already quoted
-    verbatim from their answers). Fields the reviewer did not state are left out, never guessed."""
-    lines = [f'- {label}: "{phrases[field]}"' for field, label in PROFILE_LINES if phrases.get(field)]
+def profile_block(phrases, summary_preference=None, workflow=None, level=None, brief=False, summary_given=False):
+    """The PROFILE block. `phrases` maps a profile field to the reviewer's own words (already quoted verbatim from their
+    answers). Fields the reviewer did not state are left out, never guessed; so are the rules for using them.
+    `workflow` (collaborative | read_first) and `level` (low | medium | high) are the stored values: they set the pace
+    and how much to explain, and are never shown to the reviewer as labels."""
+    stated = [(field, label) for field, label in PROFILE_LINES if phrases.get(field)]
+    lines = [f'- {label}: "{phrases[field]}"' for field, label in stated]
     shown = "\n".join(lines) if lines else "- (the reviewer has not stated any of these)"
+    uses = [f"- {PROFILE_USES[field]}" for field, _ in stated if field in PROFILE_USES]
+    extra = [x for x in (PACE.get(workflow or ""), LEVEL.get(level or ""), BREVITY if brief else "") if x]
     return (
         "PROFILE (the reviewer's own words from onboarding, quoted exactly):\n" + shown + "\n"
-        "How to use the profile: reflect these phrases back when they help (\"you said ...\"). Do not rank, grade, "
-        "re-interpret or paraphrase them into categories, and do not adopt them as your own criteria. Anything not "
-        "listed was not stated: do not guess it. The profile never changes the NEUTRALITY rules above.\n"
-        "SUMMARY RULE: " + SUMMARY_RULES.get(summary_preference or "", SUMMARY_RULE_DEFAULT))
+        "The profile is how you lead this conversation: use it actively and visibly, in their words.\n"
+        + ("\n".join(uses) + "\n" if uses else "") +
+        "Rules for the profile: quote their words back exactly (\"you said ...\"). Do not rank, grade, re-interpret or "
+        "paraphrase them into categories, and do not adopt them as your own criteria. Never use the profile to express "
+        "an opinion about the paper. Use at most one profile reference per reply, and never the same one as in your "
+        "previous reply. Anything not listed was not stated: do not guess it. The profile never changes the NEUTRALITY "
+        "rules above.\n"
+        + ("\n".join(extra) + "\n" if extra else "") +
+        "SUMMARY RULE: " + (SUMMARY_GIVEN if summary_given
+                            else SUMMARY_RULES.get(summary_preference or "", SUMMARY_RULE_DEFAULT)))
 
 
 CHAT_SYS = """You are a thinking-and-writing partner for a peer reviewer who is reading one paper and writing their review. You support their thinking and writing. You never supply your own judgment of the paper.
@@ -137,10 +182,11 @@ OUTPUT_FORMAT = """OUTPUT
 Return one JSON object: {"reply": str, "views": [{"text": str, "section": str}], "offer_response": "accept"|"reject"|null, "offer_section": str|null, "reword": {"original": str, "text": str}|null, "intent": "chat"|"gap_report"|"draft", "nudge_used": bool}. "reply" is what the reviewer sees, as plain text. Leave the other keys empty (views [], the rest null, intent "chat", nudge_used false) when they do not apply."""
 
 
-def build_chat_system(phrases, summary_preference, paper_text, draft_text, turn_notes=(), sections=()):
+def build_chat_system(phrases, summary_preference, paper_text, draft_text, turn_notes=(), sections=(), workflow=None,
+                      level=None, brief=False, summary_given=False):
     """One turn's system prompt: static instructions (which carry NEUTRALITY), the PROFILE block, the paper,
     the review draft as it stands, the review-form sections, and any notes that apply to this turn only."""
-    parts = [CHAT_SYS, profile_block(phrases, summary_preference),
+    parts = [CHAT_SYS, profile_block(phrases, summary_preference, workflow, level, brief, summary_given),
              "THE PAPER (spans are labeled [id]; cite sections and lines from here):\n" + paper_text,
              "THE REVIEW DRAFT SO FAR (the reviewer's own words, organized by review-form section):\n" + draft_text]
     if sections:

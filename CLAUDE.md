@@ -68,6 +68,14 @@ experience_level.
 The profile changes WHAT process questions the assistant asks and how much
 scaffolding it gives. It never changes the neutrality rule. Reflect the reviewer's
 own phrases back; do not map their answers onto a fixed rubric.
+The profile is the backbone of how the copilot leads, used actively and visibly in their
+words: reading order decides where the conversation goes; summary_preference whether and
+when a summary appears; workflow_mode the pace (together = lead step by step, read first =
+wait until asked); strength/weakness criteria and note_habit give one light lens prompt
+when a section is on screen; hardest_part where extra help goes; experience_level how much
+to explain; bad_review_traits are reminders when they check their draft. Quote, never
+rank or reinterpret, never use it for an opinion about the paper, at most one profile
+reference per turn, never the same one twice in a row.
 
 ## Working agreements for Claude Code
 - Read before editing; summarize the architecture before proposing changes.
@@ -108,6 +116,19 @@ own phrases back; do not map their answers onto a fixed rubric.
 - 19 *_SYS prompts (16 across 8 backend files, plus `onboarding.TOPIC_SYS`,
   `prompts.CHAT_SYS` and `prompts.VIEW_SYS`); each composes the shared NEUTRALITY block from `prompts.py`.
   `prompts.py` is also the one place for the PROFILE block and the chat prompt assembly.
+- Profile as backbone (`profile.py`, pure; `prompts.profile_block`; `chatflow.profile_kw/last_ref`). The PROFILE block
+  quotes every stated field in the reviewer's words (through `onboarding.tidy(..., edges_only=True)`: stray quotes,
+  brackets and punctuation at the ends go, no word is changed) with one usage rule per stated field, PACE
+  (workflow_mode), HOW MUCH TO EXPLAIN (experience_level, never shown as a label), a brevity line when hardest_part is
+  about time, and the SUMMARY RULE (`prompts.SUMMARY_GIVEN` once the opening summary was given, from `walk_state
+  ["summarized"]`). Rules: quote exactly, never rank/reinterpret, never an opinion about the paper, at most one profile
+  reference per turn, never the same one twice in a row (meta `profile_ref` on the assistant turn). "together": each walk
+  section after the opening's first one carries one app-written lens line (`profile.lens_line`: strength -> weakness ->
+  note habit, rotating); model turns get one `PROFILE REFERENCE` note (none with a nudge or a decline; counted as used only
+  if the reply quotes it). "read first" (`profile.reads_first`): the opening shows the summary if wanted, then
+  `walk.wait_line` ("You said “…”, so I'll wait until you ask"), no walk_at, no nudges, no lens or reference until "next".
+  The opening lead names the first two sections they named. "What's missing?" adds their bad-review words as a reminder
+  (not twice in a row) and draft notes that repeat each other (`profile.duplicates`).
 - Citations (`cites.py`): the chat prompt's POINTING AT THE PAPER block asks the model to put a
   span's `[id]` after a sentence only when the reply refers to that passage, never to support an
   evaluation. `chatflow` strips the markers (the reviewer sees a plain "(Section 4)", never an id),
@@ -231,7 +252,8 @@ reports today; update them when they change.
 
 1. **Python** (all backend tests, including the old-flow Python loop tests):
    `.\.venv\Scripts\python.exe -m pytest`
-   -> 2119 passed, 10 skipped (2129 collected). The 10 skipped are the `live` tests (item 5); any
+   -> 2148 passed, 11 skipped (2159 collected). The 11 skipped are the 10 `live` tests (item 5) and the
+   opt-in real-PDF walk test (set WALK_REAL_PDF to a local PDF, never committed); any
    other live model call must fail loudly. (If RUN_LIVE=1 is set in your shell the 10 run too.)
    Unset COPILOT_FRESH in the shell first: with it set, 3 /config and old-flow tests fail. HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
    tests/conftest.py points COPILOT_DB at a temp file so the suite never opens the real copilot.db.

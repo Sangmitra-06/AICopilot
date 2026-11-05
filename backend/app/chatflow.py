@@ -19,7 +19,7 @@ import time
 from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers, capture, cites, notecmd
 from .llm import _chat
 from .prompts import build_chat_system, build_chat_messages
-from . import prompts, walk
+from . import prompts, walk, profile
 from .verify import norm
 
 log = logging.getLogger("copilot.chat")
@@ -116,7 +116,7 @@ def profile_phrases(view):
     show the sentence they said it in (their words), never the label we map it to."""
     out = {}
     for field in ("strength_criteria", "weakness_criteria", "hardest_part", "reading_order", "note_habit",
-                  "summary_preference"):
+                  "summary_preference", "workflow_mode", "bad_review_traits", "excellent_review_example"):
         e = (view["fields"] or {}).get(field)
         if not e or e.get("source") not in ("answer", "extracted"):
             continue
@@ -127,9 +127,22 @@ def profile_phrases(view):
             raw = next((s.strip() for s in re.split(r"(?<=[.!?])\s+", raw)
                         if onboarding.EXTRACT[field](s, False) == e["value"]), raw)
         text = raw if field in onboarding.EXTRACT else (e.get("value") or raw)
+        text = onboarding.tidy(" ".join(str(text).split()), edges_only=True)   # stray edge marks only, no word changed
         if text:
-            out[field] = " ".join(text.split())[:300]
+            out[field] = text[:300]
     return out
+
+
+def profile_kw(view, pid=None):
+    """The stored values that set the pace and how much to explain (never shown as labels), and whether the opening
+    summary was already given (the SUMMARY RULE then says not to offer another), for build_chat_system."""
+    return {"workflow": profile.value(view, "workflow_mode"), "level": profile.value(view, "experience_level"),
+            "brief": profile.wants_brevity(view), "summary_given": bool(pid and store.walk_state(pid)["summarized"])}
+
+
+def last_ref(st):
+    """The profile reference the previous assistant turn used (never the same one twice in a row)."""
+    return ((st.get("last_assistant") or {}).get("meta") or {}).get("profile_ref")
 
 
 def summary_preference(view):
@@ -158,9 +171,25 @@ def review_state(pid, spans):
         "views": st["views"], "promised": st["promised"], "titles": titles}
 
 
-def gap_reply(pid, spans, variant):
+def gap_reply(pid, spans, variant, view=None, prev_ref=None, meta=None):
+    """The open-section list. With the profile: their own "what makes a review bad" words as a reminder (not twice in a
+    row), and notes in their draft that repeat each other. Both are about the REVIEW, never the paper."""
     report = coverage.gap_report(review_state(pid, spans))
-    return coverage.gap_text(report, variant), report
+    text = coverage.gap_text(report, variant)
+    if view is not None:
+        extra = []
+        line = profile.bad_traits_line(view)
+        if line and prev_ref != "bad_review_traits":
+            extra.append(line)
+            if meta is not None:
+                meta["profile_ref"] = "bad_review_traits"
+        dups = profile.duplicates([i["text"] for i in synth.items(pid) if i["kind"] != "score"])
+        if dups:
+            extra.append("These points in your draft repeat each other: " + "; ".join(
+                f"“{a}” and “{b}”" for a, b in dups[:3]) + ".")
+        if extra:
+            text += PARA + "\n".join(extra)
+    return text, report
 
 
 def draft_reply(pid, spans, variant=0):
@@ -480,7 +509,10 @@ def choose_nudge(pid, spans, view, phrases, st, message, ruled, wants_decline):
     last = (st["last_assistant"] or {}).get("meta") or {}
     if wants_decline or last.get("declined") or last.get("nudge"):
         return None
-    if store.walk_state(pid)["stopped"]:                  # "stop guiding" means the app's prompting too
+    w = store.walk_state(pid)
+    if w["stopped"]:                                      # "stop guiding" means the app's prompting too
+        return None
+    if profile.reads_first(view) and w["pointer"] is None:   # "read first": wait until they ask
         return None
     if not nudges.natural_pause(message, just_answered_offer=bool(ruled)):
         return None
@@ -538,13 +570,13 @@ PARA = "\n\n"
 OPEN_LOCK = threading.Lock()  # one opening at a time: a double click or a reload must not make two
 
 
-def opening_summary(pid, phrases, spans, names, walk_follows=True):
+def opening_summary(pid, phrases, spans, names, walk_follows=True, kw=None):
     """The descriptive summary for a reviewer who asked for one before reading, through the same checks as every chat
     reply (plus: it must carry section pointers), between the app's own short friendly lead-in and close (walk.py). None
     if the checks never pass or the model is down: the opening just goes without a summary, and the generic fallback line
     is never shown in its place."""
     system = build_chat_system(phrases, "before_reading", paper_text(spans), draft_text(pid), [prompts.OPENING_NOTE],
-                               sections=list(names.items()))
+                               sections=list(names.items()), **(kw or {}))
     ctx = {"reviewer_text": " ".join(phrases.values()), "wants_decline": False, "summary_pref": "before_reading",
            "summary_requested": True, "require_pointer": True, "reword_pool": []}
     reply, info, _ = generate_checked(build_chat_messages(system, [], prompts.OPENING_ASK), ctx, phrases, spans)
@@ -580,7 +612,7 @@ def section_description(pid, view, spans, entry):
         return None
     phrases, names, pref = profile_phrases(view), synth.names(), summary_preference(view)
     system = build_chat_system(phrases, pref, paper_text(spans), draft_text(pid), [prompts.section_note(title)],
-                               sections=list(names.items()))
+                               sections=list(names.items()), **profile_kw(view, pid))
     ctx = {"reviewer_text": " ".join(phrases.values()), "wants_decline": False, "summary_pref": pref,
            "summary_requested": True, "require_pointer": True, "reword_pool": []}
     reply, info, _ = generate_checked(build_chat_messages(system, [], prompts.section_ask(title)), ctx, phrases, spans)
@@ -596,7 +628,7 @@ def section_description(pid, view, spans, entry):
     return text, hidden
 
 
-def section_message(pid, view, spans, entry, lead, hint="", kind="section"):
+def section_message(pid, view, spans, entry, lead, hint="", kind="section", prev_ref=None, lens=True):
     """The app taking the reviewer to one section: its own short line (the reviewer's words, no pointer), then a short
     descriptive paragraph about the section with one pointer per sentence. Every cited passage is in the section, so the PDF
     scrolls to and marks it. If no description can be made, the line carries the pointer itself (first passages cited)."""
@@ -607,9 +639,13 @@ def section_message(pid, view, spans, entry, lead, hint="", kind="section"):
     else:
         proposal = None
         text, hidden = walk.marked(lead, spans, entry["section"]), []
+    ref = None if profile.reads_first(view) or not lens else profile.choose(view, prev_ref)
+    if ref:                                               # their lens, never a word about the paper
+        text += PARA + profile.lens_line(ref, view)
     text += (PARA + hint) if hint else ""
     shown, parts, found = cites.extract(text, spans)
-    return {"kind": kind, "reply": shown, "parts": parts, "cites": add_hidden(found, hidden, spans), "proposal": proposal}
+    return {"kind": kind, "reply": shown, "parts": parts, "cites": add_hidden(found, hidden, spans), "proposal": proposal,
+            "profile_ref": ref}
 
 
 def open_turn(pid, rid, spans):
@@ -625,19 +661,24 @@ def open_turn(pid, rid, spans):
         phrases, names = profile_phrases(view), synth.names()
         messages = []
         order = walk.build_order(view, spans)
+        waits = profile.reads_first(view)                 # "read first": the app does not lead, it waits
         if summary_preference(view) == "before_reading":
-            s = opening_summary(pid, phrases, spans, names, walk_follows=bool(order))
+            s = opening_summary(pid, phrases, spans, names, walk_follows=bool(order) and not waits, kw=profile_kw(view))
             if s:
                 messages.append(s)
         summarized = bool(messages)
-        if order:
-            messages.append(section_message(pid, view, spans, order[0], walk.opening_lead(order[0]), walk.GUIDE_HINT))
+        if order and waits:
+            messages.append({"kind": "wait", "reply": walk.wait_line(profile.words(view, "workflow_mode"), order[0]),
+                             "parts": None, "cites": []})
+        elif order:
+            messages.append(section_message(pid, view, spans, order[0], walk.opening_lead(order[0], order),
+                                            walk.GUIDE_HINT, lens=False))      # the opening already says enough
         for m in messages:
             log_chat(pid, "assistant", m["reply"], opening=m["kind"], proposal=m.pop("proposal", None),
-                     cites=[c["id"] for c in m["cites"]],
+                     profile_ref=m.pop("profile_ref", None), cites=[c["id"] for c in m["cites"]],
                      parts=m["parts"])
         store.log(pid, "opening_made", {"summarized": summarized, "order": order})
-        if order:
+        if order and not waits:
             store.log(pid, "walk_at", {"index": 0, "section": order[0]["section"], "reason": "start"})
         return {"opened": bool(messages), "messages": messages}
 
@@ -676,7 +717,7 @@ def turn(pid, rid, message, spans):
 
     w = store.walk_state(pid)
     nt = None if ruled else note_turn(pid, message, names, st)
-    wt = None if nt else walk_turn(pid, spans, message, w, ruled, variant, view) if walk.active(w) else None
+    wt = None if nt else walk_turn(pid, spans, message, w, ruled, variant, view, last_ref(st)) if walk.active(w) else None
     if nt:                                                # "move it", "also as a strength", "add the summary", "undo"
         out.update(reply=nt["reply"], added=nt["added"], notes_changed=nt["notes_changed"],
                    checks={"attempts": 0, "fallback": False})
@@ -687,8 +728,10 @@ def turn(pid, rid, message, spans):
         meta["intent"], meta["walk"] = "walk", wt["walk"]["section"] or wt["walk"]["kind"]
         if wt.get("proposal"):
             meta["proposal"] = wt["proposal"]
+        if wt.get("profile_ref"):
+            meta["profile_ref"] = wt["profile_ref"]
     elif GAP_REQ.search(message) or GAP_REQ2.search(message):
-        out["reply"], out["gaps"] = gap_reply(pid, spans, variant)
+        out["reply"], out["gaps"] = gap_reply(pid, spans, variant, view, last_ref(st), meta)
         out["reply"] = add_line(pid, out, names, out["reply"])
         out["checks"] = {"attempts": 0, "fallback": False}
         meta["intent"] = "gap_report"
@@ -713,7 +756,7 @@ def turn(pid, rid, message, spans):
     return out
 
 
-def walk_turn(pid, spans, message, w, ruled, variant, view):
+def walk_turn(pid, spans, message, w, ruled, variant, view, prev_ref=None):
     """The guided walk's answer to the reviewer's message, written by the app (no model, nothing about the paper), or None
     when the message is not a walk signal: "stop guiding"; a jump ("go to results"), which resets the pointer; or a done
     signal ("ok", "next", "got it", "move on"), which moves to the next section that has not been shown. A done signal
@@ -722,9 +765,10 @@ def walk_turn(pid, spans, message, w, ruled, variant, view):
 
     def moved(i, kind, entry):
         store.log(pid, "walk_at", {"index": i, "section": entry["section"], "reason": kind})
-        m = section_message(pid, view, spans, entry, walk.move_lead(entry, kind, order, w["covered"]))
+        m = section_message(pid, view, spans, entry, walk.move_lead(entry, kind, order, w["covered"]), prev_ref=prev_ref)
         return {"reply": m["reply"], "parts": m["parts"], "cites": m["cites"],
-                "walk": {"kind": kind, "section": entry["section"]}, "proposal": m["proposal"]}
+                "walk": {"kind": kind, "section": entry["section"]}, "proposal": m["proposal"],
+                "profile_ref": m["profile_ref"]}
 
     if walk.STOP.search(msg):
         store.log(pid, "walk_stopped", {})
@@ -740,7 +784,7 @@ def walk_turn(pid, spans, message, w, ruled, variant, view):
     if i is not None:
         return moved(i, "advance", order[i])
     store.log(pid, "walk_done", {})
-    text, report = gap_reply(pid, spans, variant)
+    text, report = gap_reply(pid, spans, variant, view, prev_ref)
     return {"reply": walk.LAST + PARA + text, "parts": None, "cites": [], "gaps": report,
             "walk": {"kind": "end", "section": None}}
 
@@ -783,8 +827,13 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
     nudge = choose_nudge(pid, spans, view, phrases, st, message, ruled, wants_decline)
     if nudge:
         notes.append(nudges.nudge_note(nudge))
+    ref = None
+    if not nudge and not wants_decline and not profile.reads_first(view):
+        ref = profile.choose(view, last_ref(st))
+        if ref:
+            notes.append(profile.turn_note(ref, view))
     system = build_chat_system(phrases, pref, paper_text(spans), draft_text(pid), notes,
-                               sections=list(names.items()))
+                               sections=list(names.items()), **profile_kw(view, pid))
     reviewer_texts = [h["text"] for h in hist if h["role"] == "user"] + [message]
     ctx = {"reviewer_text": " ".join(reviewer_texts + list(phrases.values())), "wants_decline": wants_decline,
            "summary_pref": pref, "summary_requested": bool(chat_checks.SUMMARY_REQ.search(message)),
@@ -793,6 +842,8 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
     chat_checks.record(pid, store, info)
     out["checks"] = {"attempts": info["attempts"], "fallback": info["fallback"]}
     meta["declined"] = wants_decline or bool(chat_checks.DECLINE_MARK.search(reply[:200]))
+    if ref and not info["fallback"] and profile.norm(profile.words(view, ref)) in profile.norm(reply):
+        meta["profile_ref"] = ref                         # it was used: the next turn picks another
     if info["fallback"]:
         out["reply"] = add_line(pid, out, names, reply)   # a confirmation the app already wrote is still told truthfully
         return
@@ -804,7 +855,7 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
     if intent in ("gap_report", "draft"):
         found, parts = [], None                          # the app's own list or draft cites nothing: the PDF stays put
     if intent == "gap_report":
-        reply, out["gaps"] = gap_reply(pid, spans, variant)
+        reply, out["gaps"] = gap_reply(pid, spans, variant, view, last_ref(st), meta)
         meta["intent"] = "gap_report"
     elif intent == "draft":
         reply, out["drafted"] = draft_reply(pid, spans, variant)

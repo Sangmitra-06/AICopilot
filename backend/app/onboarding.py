@@ -91,10 +91,19 @@ _LEAD_YES = re.compile(r"^\W*(?:(?:yes|yeah|yep|yup|sure|ok|okay|well|um+|uh+|hm
 _TRAIL_POLITE = re.compile(r"\W*\b(?:please|thanks|thank you)\W*$", re.I)
 
 
-def tidy(text):
+_EDGE = "\"'“”‘’«»`[](){}<>*_#|^~=,;:-–—"
+
+
+def tidy(text, edges_only=False):
     """An answer as it reads once stray punctuation (a dangling quote, a bracket) and a leading "yes," / "ok," are set
     aside: "yes, before '" reads as "before". Used only to READ the answer; what the reviewer wrote is what is stored.
-    It never returns an empty string: a bare "yes" stays "yes"."""
+    It never returns an empty string: a bare "yes" stays "yes".
+    edges_only: strip only stray quotes, brackets and punctuation at the two ends and change no word ("restating the
+    limitations section]" -> "restating the limitations section"); used when the app quotes their words back."""
+    if edges_only:
+        t = " ".join((text or "").split())
+        cut = t.strip(_EDGE + " ")
+        return cut or t
     t = _STRAY_SYMBOLS.sub(" ", _STRAY_QUOTES.sub(" ", text or ""))
     t = " ".join(t.split())
     for pat in (_LEAD_YES, _TRAIL_POLITE):

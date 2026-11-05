@@ -1,6 +1,6 @@
 """Item 3: the opening and every walk step show a short DESCRIPTIVE paragraph about the section, not just a pointer.
 
-  * before_reading: a summary of at most three sentences, then "You said you like to start with the intro, here it is."
+  * before_reading: a summary of at most three sentences, then "You said you like to start with the intro, then the methods, so here's the intro."
     plus a description of the intro.
   * "next" (intro, then methods): "You said you like to read the intro first and then the methods, so let's go to the methods now." plus a description of the methods; the cites are
     that section's passages, so the PDF moves there every time.
@@ -37,7 +37,7 @@ def test_the_opening_names_the_reviewers_word_and_describes_the_section(env):
     msg = make["messages"][-1]
     assert msg["kind"] == "section"
     first, _, rest = msg["reply"].partition("\n\n")
-    assert first == "You said you like to start with the intro, here it is."          # no pointer on the app's line
+    assert first == "You said you like to start with the intro, then the methods, so here's the intro."   # no pointer on the app's line
     assert "(Section 1)" in rest and "[p" not in msg["reply"]
     assert "introduces the task" in rest
     assert {x["section"] for x in msg["cites"]} == {"1 Introduction"}
@@ -105,7 +105,7 @@ def test_a_description_that_judges_is_rejected_and_the_plain_pointer_line_is_sho
     msg = start(c)["messages"][-1]
     assert len(model.calls) == 2                                                     # regenerated once
     assert not BANNED.search(msg["reply"]) and cc.FALLBACK not in msg["reply"]
-    assert msg["reply"].startswith("You said you like to start with the intro, here it is (Section 1).")
+    assert msg["reply"].startswith("You said you like to start with the intro, then the methods, so here's the intro (Section 1).")
     assert {x["section"] for x in msg["cites"]} == {"1 Introduction"}
 
 

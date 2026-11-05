@@ -225,11 +225,24 @@ def marked(line, spans, title):
     return f"{line} {ids}." if ids else f"{line}."
 
 
-def opening_lead(entry):
-    """The app's own words that take the reviewer to the first section (no full stop, no pointer)."""
+def opening_lead(entry, order=()):
+    """The app's own words that take the reviewer to the first section (no full stop, no pointer). The reading order
+    leads: "You said you like to start with the intro, then the methods, so here's the intro"."""
     if entry.get("said"):
+        nxt = next((e for e in order if e.get("said") and e["section"] != entry["section"]
+                    and e["said"] != entry["said"]), None)
+        if nxt:
+            return f"You said you like to start with {where(entry)}, then {where(nxt)}, so here's {where(entry)}"
         return f"You said you like to start with {where(entry)}, here it is"
     return f"Let's begin at the start of the paper, with {where(entry)}"
+
+
+def wait_line(said, first):
+    """workflow_mode "read first": the app does not lead. Their words, and how to ask for the walk when they want it."""
+    lead = f"You said {said.strip().rstrip('.')!s}" if said else "You'd rather read on your own first"
+    lead = lead.replace("You said ", "You said “", 1) + "”" if said else lead
+    return (f"{lead}, so I'll wait until you ask. Ask me anything as you read, or say “next” whenever you want me to "
+            f"take you through it, starting with {where(first)}.")
 
 
 def opening_line(entry, spans):

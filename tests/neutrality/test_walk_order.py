@@ -127,7 +127,7 @@ def test_the_opening_offers_the_first_section_in_their_words_and_cites_its_spans
     assert asked(model) == []                                                    # no summary asked for
     assert body["opened"] is True and [m["kind"] for m in body["messages"]] == ["section"]
     m = body["messages"][0]
-    assert m["reply"].startswith("You said you like to start with the intro, here it is.\n\n")
+    assert m["reply"].startswith("You said you like to start with the intro, then the methods, so here's the intro.\n\n")
     assert [x["id"] for x in m["cites"]] == ["s2"]                              # its spans: the PDF scrolls there
     assert m["parts"] and any(p["cite"] == ["s2"] for p in m["parts"])
     assert not BANNED.search(m["reply"])
@@ -142,7 +142,7 @@ def test_with_a_summary_the_section_comes_second_as_its_own_message(chat_env):
     set_model({"reply": SUMMARY})
     body = open_(c)
     assert [m["kind"] for m in body["messages"]] == ["summary", "section"]
-    assert body["messages"][1]["reply"].startswith("You said you like to start with the abstract, here it is.\n\n")
+    assert body["messages"][1]["reply"].startswith("You said you like to start with the abstract, then the method, so here's the abstract.\n\n")
     assert [t["meta"]["opening"] for t in assistant_turns()] == ["summary", "section"]   # both survive a reload
 
 

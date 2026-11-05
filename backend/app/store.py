@@ -214,11 +214,13 @@ def chat_state(paper):
 def fold_walk(evs):
     """Pure replay of the guided walk: whether the opening turn was made, the reading order it fixed, where the pointer
     is, which sections were shown (covered), and whether the reviewer stopped the guiding. Later events win."""
-    st = {"opened": False, "order": [], "pointer": None, "covered": [], "stopped": False, "done": False}
+    st = {"opened": False, "order": [], "pointer": None, "covered": [], "stopped": False, "done": False,
+          "summarized": False}
     for e in evs:
         t, p = e["type"], e["payload"]
         if t == "opening_made":
             st["opened"], st["order"] = True, list(p.get("order") or [])
+            st["summarized"] = bool(p.get("summarized"))
         elif t == "walk_at":
             st["pointer"], st["done"] = p["index"], False
             if p["section"] not in st["covered"]:
