@@ -15,9 +15,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "loops"))  
 
 
 def pytest_collection_modifyitems(config, items):
+    from live_env import live_credentials, live_skip_reason
     if os.environ.get("RUN_LIVE") == "1":
-        return
-    skip = pytest.mark.skip(reason="live-model test; set RUN_LIVE=1 to run")
+        reason = live_skip_reason(*live_credentials())
+        if not reason:
+            return
+    else:
+        reason = "live-model test; set RUN_LIVE=1 to run"
+    skip = pytest.mark.skip(reason=reason)
     for it in items:
         if "live" in it.keywords:
             it.add_marker(skip)
@@ -25,8 +30,18 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(autouse=True)
 def no_network(request, monkeypatch):
-    """Same block as tests/conftest.py, lifted only for tests marked `live`."""
+    """Same block as tests/conftest.py, lifted only for tests marked `live`. A live test gets a client with the real key
+    and model (shell, else backend/.env), set before anything uses the client: llm.client was built at import time with
+    the dummy key the mocked tests use."""
     if request.node.get_closest_marker("live"):
+        from openai import OpenAI
+        from app import llm
+        from live_env import live_credentials
+        key, model = live_credentials()
+        monkeypatch.setenv("OPENROUTER_API_KEY", key)
+        monkeypatch.setenv("MODEL", model)
+        monkeypatch.setattr(llm, "client", OpenAI(base_url=str(llm.client.base_url), api_key=key))
+        monkeypatch.setattr(llm, "MODEL", model)
         return
     from app import llm
 

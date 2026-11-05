@@ -1,4 +1,4 @@
-import os, re, json, base64
+import os, re, json, base64, pathlib
 import pymupdf
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -7,7 +7,10 @@ from .prompts import NEUTRALITY
 from .verify import verify, norm
 from .ingest import locate, add_span, page_plain, norm as inorm
 
-load_dotenv()
+# backend/.env, found from this file, so the key loads from any working directory (repo root, backend/, tests).
+# Variables already set in the environment win (load_dotenv never overrides them).
+ENV_FILE = pathlib.Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(ENV_FILE)
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ["OPENROUTER_API_KEY"])
 MODEL = os.environ["MODEL"]
 USE_PDF = os.environ.get("USE_PDF", "1") == "1"

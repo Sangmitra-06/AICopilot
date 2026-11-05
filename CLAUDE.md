@@ -252,7 +252,7 @@ reports today; update them when they change.
 
 1. **Python** (all backend tests, including the old-flow Python loop tests):
    `.\.venv\Scripts\python.exe -m pytest`
-   -> 2148 passed, 11 skipped (2159 collected). The 11 skipped are the 10 `live` tests (item 5) and the
+   -> 2158 passed, 11 skipped (2169 collected). The 11 skipped are the 10 `live` tests (item 5) and the
    opt-in real-PDF walk test (set WALK_REAL_PDF to a local PDF, never committed); any
    other live model call must fail loudly. (If RUN_LIVE=1 is set in your shell the 10 run too.)
    Unset COPILOT_FRESH in the shell first: with it set, 3 /config and old-flow tests fail. HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
@@ -270,9 +270,10 @@ reports today; update them when they change.
 4. **Frontend build** (run in frontend/): `npm run build`. Optional lint of the chat code, also
    in frontend/: `npx oxlint src/chat src/main.jsx src/pdf` (should print nothing).
 5. **Live-model tests** (not in the default run; real model calls with the real key):
-   put the real OPENROUTER_API_KEY and MODEL from backend/.env into the environment first
-   (tests/conftest.py otherwise gives them dummy values), then
-   `$env:RUN_LIVE = "1"; .\.venv\Scripts\python.exe -m pytest -m live`
+   `$env:RUN_LIVE = "1"; .\.venv\Scripts\python.exe -m pytest -m live` from any directory. The key and model come
+   from the shell if it set them, else from backend/.env by absolute path (`tests/live_env.py`); mocked tests keep
+   dummy values and a blocked network. With RUN_LIVE=1 and no key anywhere, the live tests skip with a message
+   naming backend/.env (never a 401). `llm.py` itself loads backend/.env by absolute path (`llm.ENV_FILE`).
    -> 10 tests (8 chat-checks + 2 for the guided walk, `test_walk_live.py`).
 6. **Browser end-to-end check** (not in the default run; needs Chrome and a built frontend):
    `node scripts/e2e/drive.mjs` (full journey; a few real model calls, needs the key in

@@ -19,8 +19,13 @@ import tempfile
 # store.py opens COPILOT_DB when it is imported. Point it at a throwaway file first so the suite never
 # creates or writes the real copilot.db (set before any `app` import below or in test modules).
 os.environ.setdefault("COPILOT_DB", os.path.join(tempfile.mkdtemp(prefix="copilot-tests-"), "events.db"))
-os.environ.setdefault("OPENROUTER_API_KEY", "test-key")
-os.environ.setdefault("MODEL", "test-model")
+# Mocked tests run with dummy credentials (the real key never reaches them; the network is blocked below anyway).
+# live_env keeps what the shell had for the tests marked `live` (imported before the dummies are set).
+sys.path.insert(0, str(ROOT / "tests"))
+import live_env  # noqa: E402
+
+os.environ.setdefault("OPENROUTER_API_KEY", live_env.DUMMY_KEY)
+os.environ.setdefault("MODEL", live_env.DUMMY_MODEL)
 
 try:
     import pymupdf  # noqa: F401
