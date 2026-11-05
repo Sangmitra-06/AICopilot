@@ -61,12 +61,16 @@ FACT_CUE = re.compile(r"\d|\b(?:paper|authors?|they|their|section|table|figure|d
 
 def paper_text(spans, cap=PAPER_CHAR_CAP):
     """The paper as labeled spans grouped by section. References and stray page text are left out."""
-    out, size, cur = [], 0, None
+    out, size, cur, top = [], 0, None, None
     for s in spans:
         if s.get("section") == "References":
             break
         if s.get("kind") in ("loose", "added"):
             continue
+        if s.get("top") != top:                  # a top-level heading with no text of its own ("3 Methods" before 3.1)
+            top = s.get("top")
+            if top and top != s["section"]:
+                out.append(f"\n## {top}")
         if s["section"] != cur:
             cur = s["section"]
             out.append(f"\n## {cur}")

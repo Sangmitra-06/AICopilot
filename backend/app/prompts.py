@@ -107,7 +107,8 @@ def section_note(title):
     return (f'The reviewer is being taken to the section "{title}" of the paper. Write a short paragraph describing what '
             "that section contains, as your whole reply: at most three sentences, descriptive only. Each sentence says "
             "what the authors state, do or present in that section and ends with the label of one passage from that "
-            "section, in square brackets (use only passages under that heading, one label per sentence). Use no evaluative "
+            "section, in square brackets (use only passages under that heading or its subsections, one label per sentence). "
+            "Use no evaluative "
             "words about the paper or any part of it. Do not offer to add anything to the draft, do not ask a question, "
             "and do not say what to do next.")
 

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 import re
 from contextlib import asynccontextmanager
 from . import fresh, ingest, llm, store, pointers, synth, criteria, criterion, factcheck, chat, helper, onboarding, venue, chatflow
-from . import brief as brief_mod
+from . import brief as brief_mod, walk as walk_mod
 from . import guide as guide_mod
 
 
@@ -32,7 +32,7 @@ DATA_DIR = os.environ.get("COPILOT_DATA_DIR", "data")
 
 def spans_of(pid):
     if pid not in CACHE:
-        sp = ingest.ingest(f"{DATA_DIR}/{pid}.pdf")
+        sp = walk_mod.add_tops(ingest.ingest(f"{DATA_DIR}/{pid}.pdf"), ingest.INFO.get("headings"))   # (ingest: old flow)
         for e in store.events(pid):
             if e["type"] == "span_added":
                 sp.append(e["payload"])

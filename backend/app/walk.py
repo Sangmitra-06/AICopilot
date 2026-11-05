@@ -15,14 +15,16 @@ HIDDEN = ("References", "Front matter", "Added from PDF")
 # that matches any section ("results" means a Results section if there is one, otherwise Experiments).
 _EXP = [r"experiment|evaluation", r"result|empirical|finding"]
 _RES = [r"result", r"experiment|evaluation|empirical|finding"]
-_METH = [r"method", r"approach|model|architecture|framework|technique|algorithm|system|set-?up"]
+# The method words all mean the same part of the paper. Their second tier (a "Model" or "Framework" section) is used only
+# when no section says method/approach/setup, only for top-level sections, and never for one that NOT_METHODS names.
+_METH = [r"method|approach|set-?up", r"\b(?:model|architecture|framework|technique|algorithm|system)s?\b"]
+NOT_METHODS = re.compile(r"result|conclu|discussion|finding|evaluat|analys|generali|limitation|related|future|summary",
+                         re.I)
 WORDS = [
     (r"abstract", [r"abstract"]),
     (r"intro(?:duction)?", [r"intro"]),
     (r"related\s+work|prior\s+work|literature|background", [r"related|prior work|literature|background"]),
-    (r"methodology|methods?", _METH),
-    (r"approach", [r"approach"] + _METH),
-    (r"set-?up", [r"set-?up"] + _METH),
+    (r"experimental\s+set-?up|methodology|methods?|approach(?:es)?|set-?ups?", _METH),
     (r"models?|architecture", [r"model|architecture"] + _METH),
     (r"results?|findings", _RES),
     (r"experiments?|experimental|evaluations?", _EXP),
@@ -39,8 +41,50 @@ _CLAUSE = re.compile(r"[,;.\n]|->|→|\bthen\b|\band\b|\bbut\b", re.I)
 _AVOID = re.compile(r"\b(?:skip(?:ping)?|ignore|avoid|never|don(?:'|’)?t|do not|rarely|last|leave|without)\b", re.I)
 
 
+TOPNUM = re.compile(r"^(\d{1,2})\.?\s+\S")
+SUBNUM = re.compile(r"^(\d{1,2})(?:\.\d{1,2}){1,3}\.?\s+\S")
+
+
+def top_of(heading, current):
+    """The top-level numbered section a heading belongs to: itself for "3 Methods", the current top-level section for
+    "3.1 Probe Design" if that is section 3, None for anything else (unnumbered headings, appendices, a subsection whose
+    parent heading was not found)."""
+    if TOPNUM.match(heading):
+        return heading
+    m = SUBNUM.match(heading)
+    if m and current and TOPNUM.match(current).group(1) == m.group(1):
+        return current
+    return None
+
+
+def add_tops(spans, headings):
+    """Give every span its top-level section (`top`), from the headings ingest found, in order (ingest.INFO["headings"]).
+    A top-level heading followed directly by its first subsection ("3 Methods" then "3.1 Probe Design") labels no span of
+    its own, so it is only visible here. Spans whose section is not a heading (front matter, added spans) get None."""
+    texts = [h.get("text") for h in headings or []]
+    pos, top, cur, cur_top = 0, None, object(), None
+    for s in spans:
+        sec = s.get("section")
+        if sec != cur:
+            cur, cur_top = sec, None
+            j = next((k for k in range(pos, len(texts)) if texts[k] == sec), None)
+            if j is not None:
+                for k in range(pos, j + 1):
+                    top = top_of(texts[k], top)
+                pos, cur_top = j + 1, top
+        s["top"] = cur_top
+    return spans
+
+
+def unit(span):
+    """The walk's unit for a span: its top-level numbered section ("3 Methods" for a span in "3.2 Training Details",
+    see ingest.top_of), else its own section. A top-level heading with no text of its own under it is still a unit."""
+    return span.get("top") or span.get("section")
+
+
 def real_sections(spans):
-    """The paper's own sections, in paper order: no references (or anything after), no front matter, no stray text."""
+    """The paper's own top-level sections, in paper order: no references (or anything after), no front matter, no stray
+    text."""
     out = []
     for s in spans:
         sec = s.get("section")
@@ -48,22 +92,41 @@ def real_sections(spans):
             break
         if sec in HIDDEN or s.get("kind") in ("loose", "added") or not sec:
             continue
-        if sec not in out:
-            out.append(sec)
+        if unit(s) not in out:
+            out.append(unit(s))
     return out
 
 
+SUBSECTION = re.compile(r"^\s*(?:\d+|[A-Z])\.\d")
+
+
+def is_top(title):
+    return not SUBSECTION.match(title)
+
+
 def titles_for(word_index, sections):
-    """The sections one of WORDS stands for in this paper (first tier that matches), in paper order."""
-    for pat in WORDS[word_index][1]:
+    """The sections one of WORDS stands for in this paper (first tier that matches), in paper order. Top-level sections
+    are preferred to subsections with the same word; a method word never stands for a results, discussion or conclusion
+    section, and its second tier ("Model", "Framework") is for top-level sections only."""
+    tiers = WORDS[word_index][1]
+    method = _METH[0] in tiers
+    for pat in tiers:
         hit = [t for t in sections if re.search(pat, t.lower())]
+        if method:     # a title saying method/approach/setup always qualifies; any other only if top-level and not results
+            hit = [t for t in hit if re.search(_METH[0], t.lower()) or (is_top(t) and not NOT_METHODS.search(t))]
+        hit = [t for t in hit if is_top(t)] or hit
         if hit:
             return hit
     return []
 
 
 def by_number(num, sections):
-    return [t for t in sections if re.match(rf"{re.escape(num)}(?:\.?\s|$)", t)]
+    """Sections numbered `num`; for "3.2" when the walk only has "3 Methods", the top-level section it belongs to."""
+    while True:
+        hit = [t for t in sections if re.match(rf"{re.escape(num)}(?:\.?\s|$)", t)]
+        if hit or "." not in num:
+            return hit
+        num = num.rsplit(".", 1)[0]
 
 
 def mentions(text, sections):
@@ -120,8 +183,8 @@ def build_order(view, spans):
 # ------------------------------------------------------------------ what the app says
 
 def section_spans(spans, title, n=3):
-    """The first few passages of a section, to cite: the PDF scrolls to and marks them."""
-    return [s for s in spans if s.get("section") == title and cites.citable(s)][:n]
+    """The first few passages of a section (with its subsections), to cite: the PDF scrolls to and marks them."""
+    return [s for s in spans if unit(s) == title and cites.citable(s)][:n]
 
 
 def the(said):
