@@ -88,20 +88,23 @@ def test_sections_the_reviewer_did_not_name_are_not_claimed_as_theirs(env):
     c, _ = env
     start(c, "I start with the intro and then go to methods.")
     say(c, "next")                                                                # -> methods (named)
-    body = say(c, "next")                                                         # -> the abstract (paper order fill)
-    assert body["reply"].startswith("Moving to the abstract") and "as you said" not in body["reply"]
-    assert sections_cited(body) == {"Abstract"}
+    body = say(c, "next")                                                         # -> paper order, forward from methods
+    assert body["reply"].startswith("Moving to the experiments") and "as you said" not in body["reply"]
+    assert sections_cited(body) == {"4 Experiments"}
+
+
+WALKED = ["1 Introduction", "3 Method", "4 Experiments", "5 Results", "6 Conclusion"]   # "next" never goes back
 
 
 def test_every_section_is_walked_once_and_the_end_offers_the_open_review_sections(env):
     c, set_model = env
     start(c)
     seen = [store.walk_state("p1")["covered"][0]]
-    for _ in range(len(ORDER) - 1):
+    for _ in range(len(WALKED) - 1):
         body = say(c, "next")
         assert len(sections_cited(body)) == 1
         seen.append(next(iter(sections_cited(body))))
-    assert seen == ORDER                                                          # in order, none twice
+    assert seen == WALKED                                                         # in order, none twice
     model = set_model({"reply": "A normal answer."})
     end = say(c, "next")
     assert end["reply"].startswith("That was the last section in your order.")
@@ -121,7 +124,7 @@ def test_a_covered_section_is_not_revisited_after_a_jump_either(env):
     say(c, "go back to the intro")                                                # asked for: allowed, and says so
     assert pointer() == 0
     body = say(c, "next")
-    assert sections_cited(body) == {"Abstract"}                                   # method and experiments were shown: skipped
+    assert sections_cited(body) == {"5 Results"}                                  # method and experiments were shown: skipped
     covered = store.walk_state("p1")["covered"]
     assert len(covered) == len(set(covered))
 

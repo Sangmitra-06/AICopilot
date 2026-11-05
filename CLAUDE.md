@@ -164,7 +164,7 @@ reference per turn, never the same one twice in a row.
   "also as a strength" (a copy in a second section), "add the summary" / "add all of it" (the app's own summary or section
   description, kept as meta `proposal` on its turn, saved with `origin: paper_claims` and `label` "Drafted from the paper's
   claims", shown above the paragraph in the panel and never copied; "all of it" after a pasted sentence replaces that
-  sentence), "undo" (reverts the last `note_action`). Right after a save, a correction naming a section moves it and "don't
+  sentence), "undo" (reverts the last `note_action`). A quoted text the model proposes ("For your strengths you could write: “…”", `chatflow.quoted_proposal`, meta `proposal` with `quoted`, never a quote of the reviewer's own words) is saved by "add it" / "this is good add it to the draft" / "you can add the draft as is" exactly, without pointers, in the section named before the quote, labelled `notecmd.APPROVED_LABEL`; with nothing proposed the app says `capture.NOT_ADDED`. A view counts as already saved only if the same words are in the same section (`chatflow.split_saved`), and the app then says so (`notecmd.duplicate_line`). Right after a save, a correction naming a section moves it and "don't
   add that" undoes it. A saved point does not move the walk on; "next" does. Legacy pending offers (`capture.answer`,
   `add_line`) still resolve as before. "What's missing?" and "draft
   it" (broad wording in `chatflow.GAP_REQ2/DRAFT_REQ2`, plus a model reply that only promises a list or draft) are answered
@@ -203,7 +203,7 @@ reference per turn, never the same one twice in a row.
   to section 3", only when the whole message is the move) -> "Going to the results, as you asked." ("Let's look at the
   intro again, as you asked." only for a section already shown) and the pointer resets
   there; the end of the order -> "That was the last section in your order." plus the open review-form sections (the gap
-  report); "stop guiding" -> stopped for good (no resume; nudges stop too). A covered section is not shown again unless the
+  report); "stop guiding" -> stopped for good (no resume; nudges stop too). "next" never goes to an unnamed section earlier in the paper than the current or last named one (`walk.next_index` with the paper order), and goes exactly to a piece the last reply offered ("Say next for Section 3.4", `walk.offered_target`). A covered section is not shown again unless the
   reviewer jumps back to it. An accepted capture moves on after the app's "Added to ..." line unless that turn carries a
   nudge, a fresh offer, a gap list or a draft. Walk lines contain only the reviewer's own word, the paper's heading
   (repeated only if `walk.rates` finds no evaluative word in it, else "the next section") and a pointer.
@@ -252,7 +252,7 @@ reports today; update them when they change.
 
 1. **Python** (all backend tests, including the old-flow Python loop tests):
    `.\.venv\Scripts\python.exe -m pytest`
-   -> 2158 passed, 11 skipped (2169 collected). The 11 skipped are the 10 `live` tests (item 5) and the
+   -> 2185 passed, 11 skipped (2196 collected). The 11 skipped are the 10 `live` tests (item 5) and the
    opt-in real-PDF walk test (set WALK_REAL_PDF to a local PDF, never committed); any
    other live model call must fail loudly. (If RUN_LIVE=1 is set in your shell the 10 run too.)
    Unset COPILOT_FRESH in the shell first: with it set, 3 /config and old-flow tests fail. HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;

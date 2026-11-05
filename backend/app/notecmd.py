@@ -82,26 +82,54 @@ THIRD_PARTY = re.compile(r"\b(?:authors?|they|we|it|paper|study|work)\s+(?:also\
                          r"included|use|uses|used|put|puts|save|saves|keep|keeps)\b", re.I)
 
 
-def only_command_words(message, sections):
+def only_command_words(message, sections, extra=frozenset()):
     sec_words = {w for s in sections for w in nudges.section_words(s)} | {w + "s" for s in sections
                                                                            for w in nudges.section_words(s)}
     low = (message or "").lower()
     for s in sections:                                          # a full section name ("paper summary") counts as one
         low = low.replace(s["name"].lower(), " ")
-    rest = [t for t in words(low) if t not in COMMAND_WORDS and t not in sec_words]
+    rest = [t for t in words(low) if t not in COMMAND_WORDS and t not in extra and t not in sec_words]
     return all(section_in(t, sections) for t in rest)           # a leftover word may only be a misspelled section name
 
 
-CORRECTION = re.compile(r"^\W*(?:no|nope|actually|rather|instead|wrong)\b|\b(?:i mean|i meant|instead|rather|"
+# Approving the text the app just proposed ("add it", "this is good add it to the draft", "you can add the draft as is").
+APPROVE = re.compile(r"\b(?:add|put|save|include|use|paste|keep|take)\s+(?:it|that|this|them|(?:the|your|this|that)\s+"
+                     r"(?:draft|line|text|sentence|paragraph|proposal|suggestion|version|wording|one))\b", re.I)
+APPROVAL_WORDS = frozenset("""good great fine perfect nice looks look is as can could you draft review works thanks thank
+exactly love go ahead them line text sentence paragraph proposal suggestion version wording""".split())
+
+
+CORRECTION = re.compile(r"^\W*(?:no|nope|not|actually|rather|instead|wrong)\b|\b(?:i mean|i meant|instead|rather|"
                         r"not there|wrong section)\b", re.I)
 IT_TO = re.compile(r"\b(?:add|put|save|file|place)\s+(?:it|that|this)\s+(?:to|in|into|under)\b", re.I)
+# "not under summary, under strengths": the section after "not" is where it should NOT go.
+NOT_THERE = re.compile(r"\bnot\s+(?:(?:under|in|into|as|to)\s+)?[^,;]*?(?=\s(?:under|in|into|to|as|but)\b|[,;]|$)", re.I)
+# Where an approving clause may start inside a longer reply: "no it doesnt lets add that to strenghts".
+APPROVE_START = re.compile(r"(?:^|[,.;:!]|\b(?:let(?:['’]?s| us)|please|so|then|just|ok(?:ay)?|yes|yeah|but|and)\b)\s*"
+                           r"(?=(?:add|put|save|include|use|paste|keep|take)\b)", re.I)
 
 
-def read(message, sections, just_saved=False):
-    """("undo",) | ("move", section id or None) | ("also", section id) | ("add", "summary" | "all", section id or None)
-    | None when the message is not a short command about notes. `just_saved`: the app's previous turn saved a note, so
-    a correction that names a section ("No, I mean strengths", "not there, add it to the comments") moves it, and a
-    refusal ("don't add that") undoes it."""
+def target_in(message, sections):
+    """The section a message sends a note to, leaving out the one after "not" ("not under suimmary under strenghts")."""
+    return section_in(NOT_THERE.sub(" ", message or ""), sections)
+
+
+def approval_tail(message, sections):
+    """The approving clause that ends a message ("lets add that to strenghts"), or None."""
+    for at in reversed([m.end() for m in APPROVE_START.finditer(message or "")]):
+        tail = message[at:]
+        if APPROVE.match(tail) and not THIRD_PARTY.search(tail) and not ALL_OF_IT.search(tail) \
+                and not wants_summary(tail) and only_command_words(tail, sections, APPROVAL_WORDS):
+            return tail
+    return None
+
+
+def read(message, sections, just_saved=False, proposed=False):
+    """("undo",) | ("move", section id or None) | ("also", section id) | ("add", "summary" | "all" | "proposed",
+    section id or None) | None when the message is not a short command about notes. `just_saved`: the app's previous turn
+    saved a note, so a correction that names a section ("No, I mean strengths", "not there, add it to the comments")
+    moves it, and a refusal ("don't add that") undoes it. `proposed`: the app's previous turn proposed a text, so "add it"
+    / "this is good add it to the draft" / "you can add the draft as is" approves exactly that text."""
     m = (message or "").strip()
     if not short(m) or QUESTIONISH.search(m):
         return None
@@ -109,7 +137,14 @@ def read(message, sections, just_saved=False):
         return ("undo",) if just_saved else None
     if UNDO.match(m):
         return ("undo",)
-    sid = section_in(m, sections)
+    approve = bool(APPROVE.search(m)) and not THIRD_PARTY.search(m) and not ALL_OF_IT.search(m) \
+        and not wants_summary(m) and only_command_words(m, sections, APPROVAL_WORDS)
+    if approve and proposed and not CORRECTION.search(m):
+        return ("add", "proposed", target_in(m, sections))
+    tail = approval_tail(m, sections) if proposed and not approve else None
+    if tail:                                                 # "no it doesnt lets add that to strenghts"
+        return ("add", "proposed", target_in(tail, sections))
+    sid = target_in(m, sections)
     if just_saved and sid and (CORRECTION.search(m) or IT_TO.search(m)) and only_command_words(m, sections):
         return ("move", sid)
     also = bool(ALSO.search(m) and sid and re.search(r"\b(?:as|to|in|into|under)\b", m, re.I))
@@ -117,11 +152,12 @@ def read(message, sections, just_saved=False):
         return ("also", sid)
     if ADD.search(m) and (ALL_OF_IT.search(m) or wants_summary(m)) and not THIRD_PARTY.search(m):
         return ("add", "all" if ALL_OF_IT.search(m) else "summary", sid)     # no section named: Paper summary
+    fallback = ("add", "proposed", sid) if approve and not (just_saved and sid) else None   # note_turn says so plainly
     if not only_command_words(m, sections):
-        return None
+        return fallback
     if MOVE.search(m):
         return ("move", sid)
-    return None
+    return fallback
 
 
 # ------------------------------------------------------------------ the app's own lines (the model never writes these)
@@ -154,9 +190,28 @@ def already_line(label):
     return f"That's already under {label}, marked as drafted from the paper's claims."
 
 
+def approved_line(label):
+    return f"Saved under {label}, marked as drafted from the paper's claims and approved by you."
+
+
+def duplicate_line(labels):
+    return "That's already in your draft under " + " and ".join(labels) + ", so I didn't save it again."
+
+
+POINTER = re.compile(r"\s*\((?:Sections?|Abstract|Appendix|Introduction|References|Table|Figure|Fig\.|p\.?)\s?[^()]{0,40}\)"
+                     r"|\s*\[[A-Za-z0-9_.:-]+(?:\s*,\s*[A-Za-z0-9_.:-]+)*\]", re.I)
+
+
+def without_pointers(text):
+    """Text to save: no "(Section 3)" pointers and no span markers, whitespace tidied."""
+    return " ".join(POINTER.sub("", text or "").split()).replace(" .", ".").replace(" ,", ",")
+
+
+NOT_SAVED = "I couldn't save that to your draft."
 NOTHING_TO_ADD = "I haven't written a summary or other text in this conversation that I could add."
 NOTHING_SAVED = "There's no note from this conversation for that to apply to yet."
 CLAIMS_LABEL = "Drafted from the paper's claims"
+APPROVED_LABEL = "Drafted from the paper's claims, approved by you"
 
 
 def undo_line(kind, label):

@@ -50,7 +50,7 @@ def test_the_next_named_section_refers_back_too_without_first(env):
 def test_a_section_they_did_not_name_claims_nothing(env):
     say(env, "next"); say(env, "next")
     line = first_line(say(env, "next"))
-    assert line == "Moving to the abstract." and "you said" not in line.lower()
+    assert line == "Moving to the discussion." and "you said" not in line.lower()   # forward, never back to the abstract
 
 
 def test_no_again_on_a_first_visit(env):

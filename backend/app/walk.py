@@ -183,8 +183,9 @@ def build_order(view, spans):
 # ------------------------------------------------------------------ what the app says
 
 def section_spans(spans, title, n=3):
-    """The first few passages of a section (with its subsections), to cite: the PDF scrolls to and marks them."""
-    return [s for s in spans if unit(s) == title and cites.citable(s)][:n]
+    """The first few passages of a section (with its subsections), to cite: the PDF scrolls to and marks them. A
+    subsection title ("3.4 Layer Selection", offered by the assistant) gets its own passages."""
+    return [s for s in spans if (unit(s) == title or s.get("section") == title) and cites.citable(s)][:n]
 
 
 def the(said):
@@ -356,12 +357,62 @@ def jump_target(message, sections):
     return {"section": titles[0], "said": said}
 
 
-def next_index(w):
-    """The next section in the order that has not been shown, after the pointer; None when the order is used up."""
-    for i in range((w["pointer"] if w["pointer"] is not None else -1) + 1, len(w["order"])):
-        if w["order"][i]["section"] not in w["covered"]:
-            return i
+def next_index(w, sections=None):
+    """The next section in the order that has not been shown, after the pointer; None when the order is used up. With the
+    paper's sections (`sections`, paper order), a section the reviewer did not name is taken only if it comes later in the
+    paper than both the current section and the last one they named: "next" never goes back (to the abstract after the
+    methods), it carries on in paper order from there."""
+    order, start = w["order"], (w["pointer"] if w["pointer"] is not None else -1)
+    floor = -1
+    if sections:
+        pos = {t: k for k, t in enumerate(sections)}
+        named = [pos.get(e["section"], -1) for e in order if e.get("said")]
+        floor = max([pos.get(order[start]["section"], -1) if 0 <= start < len(order) else -1] + named[-1:])
+    for i in range(start + 1, len(order)):
+        e = order[i]
+        if e["section"] in w["covered"]:
+            continue
+        if sections and not e.get("said") and pos.get(e["section"], -1) <= floor:
+            continue
+        return i
     return None
+
+
+def all_sections(spans):
+    """Every section of the paper, top-level and subsections, in paper order (no references or anything after, no front
+    matter, no stray text): what an offer like "Say next for Section 3.4" can point at."""
+    out = []
+    for s in spans:
+        sec = s.get("section")
+        if sec == "References":
+            break
+        if sec in HIDDEN or s.get("kind") in ("loose", "added") or not sec:
+            continue
+        for t in (unit(s), sec):
+            if t not in out:
+                out.append(t)
+    return out
+
+
+OFFER = re.compile(
+    r"\bsay\s+[“\"‘']?next[”\"’']?\s*,?\s*(?:for|to\s+(?:go\s+(?:on\s+)?to|move\s+(?:on\s+)?to|get\s+to|see|read|open|"
+    r"continue\s+(?:to|with))|and\s+(?:we(?:'|’)?ll|i(?:'|’)?ll)\s+(?:go|move|turn|head|continue)\s+(?:on\s+)?(?:to|with))"
+    r"\s+(?P<what>(?:[^.?!\n(]|\.(?=\d)){1,60})", re.I)
+
+
+def offered_target(text, spans):
+    """The part of the paper the assistant's reply offered to go to on "next" ("Say next for Section 3.4"), as
+    {"section", "said": None} (the reviewer did not say it); None when the reply offered no specific piece."""
+    hits = list(OFFER.finditer(text or ""))
+    if not hits:
+        return None
+    found = mentions(hits[-1].group("what"), all_sections(spans))
+    return {"section": found[0][0][0], "said": None} if found else None
+
+
+def unit_of(title, spans):
+    """The walk unit (top-level section) a section belongs to: "3 Methods" for "3.4 Layer Selection"."""
+    return next((unit(s) for s in spans if s.get("section") == title), title)
 
 
 def active(w):
