@@ -32,3 +32,5 @@ logs
 .DS_Store
 # browser check output (screenshots, backend log)
 scripts/e2e/out/
+
+*.pdf
