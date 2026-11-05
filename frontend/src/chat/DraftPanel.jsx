@@ -8,11 +8,12 @@ function DraftItem({ item, onEdit }) {
     const el = ref.current
     if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
   }, [item.text])
-  return (
+  return (<>
+    {item.label && <p className="ca-label">{item.label}</p>}
     <textarea ref={ref} className="ca-para" defaultValue={item.text} rows={1} aria-label="Edit this paragraph"
       onInput={e => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px' }}
       onBlur={e => onEdit(item, e.target.value)} />
-  )
+  </>)
 }
 
 // The review draft by review-form section. Sections are editable text. The only action is Copy all.

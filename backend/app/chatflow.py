@@ -16,7 +16,7 @@ import re
 import threading
 import time
 
-from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers, capture, cites
+from . import store, onboarding, synth, criteria, chat, chat_checks, coverage, nudges, pointers, capture, cites, notecmd
 from .llm import _chat
 from .prompts import build_chat_system, build_chat_messages
 from . import prompts, walk
@@ -88,9 +88,12 @@ def paper_text(spans, cap=PAPER_CHAR_CAP):
 def draft_text(pid):
     """The review as the reviewer has it now: their notes by form section, plus any generated draft text."""
     names, its = synth.names(), synth.items(pid)
+    claims = {f"n{n['id']}" for n in store.notes(pid) if n.get("origin") == "paper_claims"}
+    tag = lambda i: i["text"] + (" (drafted by the app from the paper's claims, not the reviewer's words)"
+                                 if i.get("key") in claims else "")
     blocks = []
     for fid, label in names.items():
-        mine = [i["text"] for i in sorted(its, key=lambda i: i["order"]) if i["field"] == fid]
+        mine = [tag(i) for i in sorted(its, key=lambda i: i["order"]) if i["field"] == fid]
         blocks.append(f"## {label}\n" + ("\n".join(f"- {t}" for t in mine) if mine else "(nothing yet)"))
     loose = [i["text"] for i in its if not i["field"]]
     if loose:
@@ -215,6 +218,194 @@ def accept_capture(pid, vid, view, section=None):
                                   "by": "chat", "view": vid})
     store.log(pid, "capture_resolved", {"vid": vid, "outcome": "accepted", "note_id": nid})
     return nid
+
+
+# ------------------------------------------------------------------ save-then-tell (notecmd.py reads the commands)
+
+def new_note(pid, field, text, **extra):
+    """An ordinary note_added event (the same shape as every other note: GET /notes and the draft panel show it)."""
+    nid = max([int(time.time() * 1000)] + [n["id"] + 1 for n in store.notes(pid) if isinstance(n["id"], int)]
+              + [a for act in note_actions(pid) for a in act.get("notes", []) if isinstance(a, int)])
+    store.log(pid, "note_added", {"id": nid, "field": field, "text": text, "span_ids": [], "page": None, "rect": None,
+                                  "sentence": "", "revisit": False, "question": "", "by": "chat", **extra})
+    return nid
+
+
+def live_note(pid, nid):
+    return next((n for n in store.notes(pid) if n["id"] == nid), None)
+
+
+def note_payload(n):
+    """A live note as a note_added payload, so that undo can put back exactly what was removed."""
+    keep = ("id", "field", "text", "span_ids", "page", "rect", "sentence", "revisit", "question", "by", "view", "origin",
+            "label")
+    return {k: n[k] for k in keep if k in n}
+
+
+def note_actions(pid):
+    """What the app did to notes in this conversation (saved, also, moved, proposal), in order, with undone flags."""
+    acts = []
+    for e in store.events(pid):
+        if e["type"] == "note_action":
+            acts.append(dict(e["payload"], undone=False))
+        elif e["type"] == "note_action_undone" and 0 <= e["payload"].get("at", -1) < len(acts):
+            acts[e["payload"]["at"]]["undone"] = True
+    return acts
+
+
+def last_action(pid):
+    acts = note_actions(pid)
+    for i in range(len(acts) - 1, -1, -1):
+        if not acts[i]["undone"] and acts[i]["kind"] != "undo":
+            return i, acts[i]
+    return None, None
+
+
+def same_text(a, b):
+    return norm(a or "") == norm(b or "")
+
+
+def note_in(pid, field, text):
+    return next((n for n in store.notes(pid) if n.get("field") == field and same_text(n["text"], text)), None)
+
+
+def save_views(pid, views):
+    """Save each stated view right away, in the reviewer's exact words, in its best-fitting section. Returns the saved
+    notes [(note id, section id)] that are really in the store (only those are ever told)."""
+    saved = []
+    for v in views:
+        vid = f"v{len(store.chat_state(pid)['views']) + 1}"
+        store.log(pid, "view_stated", {"vid": vid, "text": v["text"], "section": v["section"]})
+        nid = new_note(pid, v["section"], v["text"], view=vid)
+        store.log(pid, "capture_resolved", {"vid": vid, "outcome": "accepted", "note_id": nid})
+        saved.append(nid)
+    if saved:
+        store.log(pid, "note_action", {"kind": "saved", "notes": saved})
+    return [(n["id"], n.get("field") or "") for n in store.notes(pid) if n["id"] in saved]
+
+
+def proposals(pid, limit=8):
+    """Text the app showed that it may be asked to add (summaries, section descriptions), newest first."""
+    out = []
+    turns = [t for t in store.thread(pid, limit=10_000) if t.get("kind") == "chat" and t["role"] == "assistant"]
+    for t in reversed(turns[-limit:]):
+        p = (t.get("meta") or {}).get("proposal")
+        if isinstance(p, dict) and str(p.get("text") or "").strip():
+            out.append(p)
+    return out
+
+
+def find_proposal(pid, which, hint=""):
+    """"add the summary": the latest summary the app gave (else its latest text). "add all of it": the text a note the
+    reviewer just saved was part of (they pasted a sentence of it), else the app's latest text."""
+    props = proposals(pid)
+    if which == "all" and hint:
+        part = next((p for p in props if norm(hint) and norm(hint) in norm(p["text"])), None)
+        if part:
+            return part
+    if which == "summary":
+        return next((p for p in props if p.get("kind") == "summary"), props[0] if props else None)
+    return props[0] if props else None
+
+
+def told(pid, out, nid, line, names):
+    """The app's own line about a note, written only once that note really is in GET /notes."""
+    n = live_note(pid, nid)
+    if not n:
+        return None
+    label = names.get(n.get("field"), "") or "your draft"
+    out["added"] = {"note_id": n["id"], "section": n.get("field") or "", "label": label}
+    out["notes_changed"] = True
+    return line(label)
+
+
+def note_turn(pid, message, names, st):
+    """The reviewer's short command about the note just saved (notecmd.read), answered by the app with no model call,
+    or None when the message is not one. Returns {"reply", "meta"}."""
+    sections = [{"id": i, "name": n} for i, n in names.items()]
+    last = (st["last_assistant"] or {}).get("meta") or {}
+    cmd = notecmd.read(message, sections, just_saved=bool(last.get("saved")))
+    pending = last.get("move_pending")
+    if not cmd and pending and notecmd.short(message):
+        sid = notecmd.section_in(message, sections)
+        if sid:
+            cmd = ("move", sid)
+    if not cmd:
+        return None
+    out, meta = {"added": None, "notes_changed": False}, {"intent": "notes", "notes": cmd[0]}
+    i, act = last_action(pid)
+    target = None
+    if act:
+        target = act.get("source") if act["kind"] == "also" else (act.get("notes") or [None])[0]
+    label_of = lambda f: names.get(f, "") or "your draft"
+
+    if cmd[0] == "undo":
+        if not act:
+            return dict(out, reply=notecmd.NOTHING_SAVED, meta=meta)
+        field = ""
+        if act["kind"] == "moved":
+            for nid, frm in act.get("moved", []):
+                store.log(pid, "note_field_set", {"id": nid, "field": frm, "by": "chat"})
+                field = frm
+        else:
+            for nid in act.get("notes", []):
+                n = live_note(pid, nid)
+                if n:
+                    field = n.get("field") or ""
+                    store.log(pid, "note_removed", {"id": nid})
+        for p in act.get("removed", []):
+            store.log(pid, "note_added", p)
+            field = field or p.get("field") or ""
+        store.log(pid, "note_action_undone", {"at": i})
+        store.log(pid, "note_action", {"kind": "undo", "of": i})
+        out["notes_changed"] = True
+        return dict(out, reply=notecmd.undo_line(act["kind"], label_of(field)), meta=meta)
+
+    if cmd[0] == "add":
+        hint = ""
+        if act and act["kind"] == "saved" and live_note(pid, target):
+            hint = live_note(pid, target)["text"]
+        prop = find_proposal(pid, cmd[1], hint)
+        if not prop:
+            return dict(out, reply=notecmd.NOTHING_TO_ADD, meta=meta)
+        field = cmd[2] or "summary"
+        text = " ".join(prop["text"].split())
+        if note_in(pid, field, text):
+            return dict(out, reply=notecmd.already_line(label_of(field)), meta=meta)
+        removed = []
+        if hint and norm(hint) in norm(text):                  # the sentence they pasted becomes the whole text
+            part = live_note(pid, target)
+            if part and part.get("field") == field:
+                removed.append(note_payload(part))
+                store.log(pid, "note_removed", {"id": part["id"]})
+        nid = new_note(pid, field, text, by="assistant", origin="paper_claims", label=notecmd.CLAIMS_LABEL)
+        store.log(pid, "note_action", {"kind": "proposal", "notes": [nid], "removed": removed})
+        return dict(out, reply=told(pid, out, nid, notecmd.proposal_line, names) or notecmd.NOTHING_TO_ADD, meta=meta)
+
+    note = live_note(pid, target) if target is not None else None
+    if not note:
+        return dict(out, reply=notecmd.NOTHING_SAVED, meta=meta)
+    if cmd[0] == "move" and not cmd[1]:
+        meta["move_pending"] = note["id"]
+        return dict(out, reply=notecmd.where_line(list(names.values())), meta=meta)
+    sid = cmd[1]
+    if note.get("field") == sid:
+        return dict(out, reply=f"It's already under {label_of(sid)}.", meta=meta)
+    twin = note_in(pid, sid, note["text"])
+    if cmd[0] == "also":
+        if twin:
+            return dict(out, reply=f"It's already under {label_of(sid)}.", meta=meta)
+        extra = {k: note[k] for k in ("origin", "label") if k in note}
+        nid = new_note(pid, sid, note["text"], **extra)
+        store.log(pid, "note_action", {"kind": "also", "notes": [nid], "source": note["id"]})
+        return dict(out, reply=told(pid, out, nid, notecmd.also_line, names) or notecmd.NOTHING_SAVED, meta=meta)
+    if twin:                                     # already there too ("also as a strength", then "it goes in strengths")
+        store.log(pid, "note_removed", {"id": note["id"]})
+        store.log(pid, "note_action", {"kind": "moved", "notes": [twin["id"]], "moved": [], "removed": [note_payload(note)]})
+        return dict(out, reply=told(pid, out, twin["id"], notecmd.moved_line, names) or notecmd.NOTHING_SAVED, meta=meta)
+    store.log(pid, "note_field_set", {"id": note["id"], "field": sid, "by": "chat"})
+    store.log(pid, "note_action", {"kind": "moved", "notes": [note["id"]], "moved": [[note["id"], note.get("field") or ""]]})
+    return dict(out, reply=told(pid, out, note["id"], notecmd.moved_line, names) or notecmd.NOTHING_SAVED, meta=meta)
 
 
 def reject_capture(pid, vid):
@@ -367,7 +558,8 @@ def opening_summary(pid, phrases, spans, names, walk_follows=True):
     if not cites.extract(reply, spans)[2]:
         return None
     shown, parts, found = cites.extract(walk.summary_message(reply, walk_follows), spans)
-    return {"kind": "summary", "reply": shown, "parts": parts, "cites": add_hidden(found, hidden, spans)}
+    return {"kind": "summary", "reply": shown, "parts": parts, "cites": add_hidden(found, hidden, spans),
+            "proposal": {"kind": "summary", "text": cites.extract(reply, spans)[0]}}   # the descriptive part only
 
 
 def add_hidden(found, hidden, spans):
@@ -411,11 +603,13 @@ def section_message(pid, view, spans, entry, lead, hint="", kind="section"):
     desc = section_description(pid, view, spans, entry)
     if desc:
         text, hidden = lead + "." + PARA + desc[0], desc[1]
+        proposal = {"kind": "description", "text": cites.extract(desc[0], spans)[0]}
     else:
+        proposal = None
         text, hidden = walk.marked(lead, spans, entry["section"]), []
     text += (PARA + hint) if hint else ""
     shown, parts, found = cites.extract(text, spans)
-    return {"kind": kind, "reply": shown, "parts": parts, "cites": add_hidden(found, hidden, spans)}
+    return {"kind": kind, "reply": shown, "parts": parts, "cites": add_hidden(found, hidden, spans), "proposal": proposal}
 
 
 def open_turn(pid, rid, spans):
@@ -439,7 +633,8 @@ def open_turn(pid, rid, spans):
         if order:
             messages.append(section_message(pid, view, spans, order[0], walk.opening_lead(order[0]), walk.GUIDE_HINT))
         for m in messages:
-            log_chat(pid, "assistant", m["reply"], opening=m["kind"], cites=[c["id"] for c in m["cites"]],
+            log_chat(pid, "assistant", m["reply"], opening=m["kind"], proposal=m.pop("proposal", None),
+                     cites=[c["id"] for c in m["cites"]],
                      parts=m["parts"])
         store.log(pid, "opening_made", {"summarized": summarized, "order": order})
         if order:
@@ -480,11 +675,18 @@ def turn(pid, rid, message, spans):
     st = dict(store.chat_state(pid), last_assistant=previous)
 
     w = store.walk_state(pid)
-    wt = walk_turn(pid, spans, message, w, ruled, variant, view) if walk.active(w) else None
-    if wt:                                                # a walk signal: the app answers it itself, no model call
+    nt = None if ruled else note_turn(pid, message, names, st)
+    wt = None if nt else walk_turn(pid, spans, message, w, ruled, variant, view) if walk.active(w) else None
+    if nt:                                                # "move it", "also as a strength", "add the summary", "undo"
+        out.update(reply=nt["reply"], added=nt["added"], notes_changed=nt["notes_changed"],
+                   checks={"attempts": 0, "fallback": False})
+        meta.update(nt["meta"])
+    elif wt:                                                # a walk signal: the app answers it itself, no model call
         out.update(reply=wt["reply"], parts=wt["parts"], cites=wt["cites"], gaps=wt.get("gaps"), walk=wt["walk"],
                    checks={"attempts": 0, "fallback": False})
         meta["intent"], meta["walk"] = "walk", wt["walk"]["section"] or wt["walk"]["kind"]
+        if wt.get("proposal"):
+            meta["proposal"] = wt["proposal"]
     elif GAP_REQ.search(message) or GAP_REQ2.search(message):
         out["reply"], out["gaps"] = gap_reply(pid, spans, variant)
         out["reply"] = add_line(pid, out, names, out["reply"])
@@ -498,10 +700,12 @@ def turn(pid, rid, message, spans):
     else:
         model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled, variant, out, meta)
 
-    if not wt and walk.active(w):
+    if not wt and not nt and walk.active(w):
         move_on_after_capture(pid, spans, w, out, meta, view)
     out.pop("_vid", None)
-    out["draft_changed"] = (out["resolved"] or {}).get("outcome") == "accepted" or bool((out["drafted"] or {}).get("drafted"))
+    out["draft_changed"] = (out["resolved"] or {}).get("outcome") == "accepted" \
+        or bool((out["drafted"] or {}).get("drafted")) or bool(out.pop("notes_changed", False))
+    out.pop("saved", None)
     log_chat(pid, "user", message)
     if out["cites"]:                                      # kept with the reply so a reload can show the same pointers
         meta["cites"], meta["parts"] = [c["id"] for c in out["cites"]], out["parts"]
@@ -520,7 +724,7 @@ def walk_turn(pid, spans, message, w, ruled, variant, view):
         store.log(pid, "walk_at", {"index": i, "section": entry["section"], "reason": kind})
         m = section_message(pid, view, spans, entry, walk.move_lead(entry, kind, order, w["covered"]))
         return {"reply": m["reply"], "parts": m["parts"], "cites": m["cites"],
-                "walk": {"kind": kind, "section": entry["section"]}}
+                "walk": {"kind": kind, "section": entry["section"]}, "proposal": m["proposal"]}
 
     if walk.STOP.search(msg):
         store.log(pid, "walk_stopped", {})
@@ -620,31 +824,23 @@ def model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled,
             out["reword"] = {"original": j["reword"]["original"], "text": j["reword"]["text"]}
         new = valid_views(j, message, store.chat_state(pid)["views"], names)
         have = [{"text": i["text"]} for i in synth.items(pid)]
-        new = [v for v in new if not coverage.in_draft(v["text"], have)]   # already in their draft: nothing to offer
-        made, several = None, False
-        for v in new:
-            n = len(store.chat_state(pid)["views"]) + 1
-            v_id = f"v{n}"
-            store.log(pid, "view_stated", {"vid": v_id, "text": v["text"], "section": v["section"]})
-            if made is None and offers_in(reply, names):
-                made = (v_id, v)
-        if made:
-            store.log(pid, "capture_offered", {"vid": made[0]})
-            meta["offer"] = made[0]
-            out["capture"] = {"id": made[0], "text": made[1]["text"], "section": made[1]["section"],
-                              "label": names.get(made[1]["section"], "")}
-            out["conflicts"] = conflict_notes(made[1]["text"], spans)   # appended after the offer, in keep_captures_honest
-            several = len(new) > 1
-        # Keep captures honest, and offer a view found in a prose reply. This runs before the nudge check so that a turn
-        # carrying an offer is never also counted as a nudge.
-        reply = keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_decline, several)
+        new = [v for v in new if not coverage.in_draft(v["text"], have)]   # already in their draft: nothing to save
+        if new and not wants_decline:                    # save-then-tell: their exact words, saved right away
+            out["saved"] = save_views(pid, new)
+            out["conflicts"] = conflict_notes(" ".join(v["text"] for v in new), spans)
+        # Keep captures honest, and save a view found in a prose reply. This runs before the nudge check so that a turn
+        # that saved something is never also counted as a nudge.
+        reply = keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_decline)
         # A nudge counts as used when a directive was given this turn and the reply addresses that section. The model's
         # own nudge_used flag is optional (a prose reply has none); only an explicit false (it skipped the nudge) is
         # respected.
-        if nudge and j.get("nudge_used") is not False and not out["capture"] and nudge_in(reply, nudge):
+        if nudge and j.get("nudge_used") is not False and not out["capture"] and not out.get("saved") \
+                and nudge_in(reply, nudge):
             store.log(pid, "nudge_offered", {"section": nudge["section"], "kind": nudge["kind"]})
             meta["nudge"] = nudge["section"]
             out["nudge"] = {"section": nudge["section"], "label": nudge["label"], "kind": nudge["kind"]}
+    if ctx["summary_requested"] and intent not in ("gap_report", "draft") and not meta["declined"] and reply.strip():
+        meta["proposal"] = {"kind": "summary", "text": reply}     # "add the summary" can save this text
     reply = add_line(pid, out, names, reply)
     out["reply"] = reply
     out["cites"], out["parts"] = found, cites.reconcile(parts, reply)   # a note appended above stays plain text
@@ -666,6 +862,8 @@ def looks_like_view(message):
     if len(m.split()) < 4 or chat_checks.QUESTION_LIKE.search(m) or chat_checks.asks_for_judgment(m):
         return False
     if GAP_REQ.search(m) or GAP_REQ2.search(m) or DRAFT_REQ.search(m) or DRAFT_REQ2.search(m) or nudges.natural_pause(m):
+        return False
+    if capture.YES_START.match(m) and capture.ADD_VERB.search(m):     # "yes lets add it as my sentence": a request
         return False
     return not re.match(r"(?i)^\s*(?:please\s+)?(?:reword|rephrase|rewrite|tighten|soften|polish|make this)\b", m)
 
@@ -720,34 +918,39 @@ def add_line(pid, out, names, reply):
     return (reply + "\n\n" + capture.added_line(label)).strip()
 
 
-def keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_decline, several=False):
-    """The reply may say something was added to the draft only if the backend recorded it this turn.
-    - If the reply carried no structured fields and the message states a view, extract it and OFFER it in the app's
-      own wording; nothing is written until the reviewer says yes.
-    - Claims that something was added / saved / noted, and offers to do so that no offer stands behind, are removed.
-    - When the app records an offer (from the model's views or from the extraction call), every offer sentence the
-      model wrote is removed and the app's own line is the only offer in the reply."""
+def keep_captures_honest(pid, message, reply, j, names, spans, out, meta, wants_decline):
+    """The reply may say something was saved to the draft only in the app's own words, after the note is in the store.
+    - If the reply carried no structured fields and the message states a view, extract it and SAVE it right away, in
+      the reviewer's exact words (save-then-tell).
+    - Every claim the model wrote that something was added / saved / noted, and every offer to do so, is removed.
+    - The app's own line ("Saved under Soundness. Say 'move it' if that's wrong.") is the only word about it."""
     accepted_now = (out["resolved"] or {}).get("outcome") == "accepted"
-    structured = bool(j.get("views") or j.get("reword") or j.get("offer_response") or out["capture"] or out["resolved"])
-    offer = None
+    structured = bool(j.get("views") or j.get("reword") or j.get("offer_response") or out.get("saved") or out["resolved"])
     if not structured and not wants_decline and looks_like_view(message):
-        offer = offer_views(pid, extract_views(pid, message, names), names)
-    if offer:
-        meta["offer"] = offer["id"]
-        out["capture"] = {k: offer[k] for k in ("id", "text", "section", "label")}
-        several = offer["several"]
-        out["conflicts"] = conflict_notes(offer["text"], spans)
+        views = extract_views(pid, message, names)
+        if views:
+            out["saved"] = save_views(pid, views)
+            out["conflicts"] = conflict_notes(" ".join(v["text"] for v in views), spans)
     sections = [{"id": i, "name": n} for i, n in names.items()]
     asked = bool(chat.YES.match(message.strip()) or re.search(r"(?i)\b(?:add|save|capture|keep|record)\b", message))
-    recorded = bool(out["capture"])                      # an offer the app recorded this turn
-    # Every model-written claim of a capture goes, even when a note was written this turn: the app says it itself
-    # (add_line), after checking that the note exists.
+    saved = out.get("saved") or []
+    # Every model-written claim of a capture goes, even when a note was written this turn: the app says it itself, after
+    # checking that the note exists.
     reply, removed = capture.scrub(reply, sections, claims_ok=False, offers_ok=False, empty_line="")
-    if removed and not reply and not recorded and not accepted_now:
-        reply = capture.NOT_ADDED if asked else capture.OK
-    if recorded:
-        cap = out["capture"]
-        reply = (reply + "\n\n" + capture.offer_line(cap["label"], cap["text"] if several else None)).strip()
+    if removed and not reply and not saved and not accepted_now:
+        before = store.chat_state(pid)["last_assistant"] or {}          # this turn is not logged yet: the previous one
+        kept = [n for n in store.notes(pid) if n["id"] in ((before.get("meta") or {}).get("saved") or [])]
+        if asked and kept:                                               # it is in the draft: say so, truthfully
+            reply = "That's already saved under " + " and ".join(
+                dict.fromkeys(names.get(n.get("field"), "") or "your draft" for n in kept)) + "."
+        else:
+            reply = capture.NOT_ADDED if asked else capture.OK
+    if saved:
+        labels = list(dict.fromkeys(names.get(f, "") or "your draft" for _, f in saved))
+        out["added"] = {"note_id": saved[0][0], "section": saved[0][1], "label": labels[0]}
+        out["notes_changed"] = True
+        meta["saved"] = [nid for nid, _ in saved]              # a correction next turn moves these
+        reply = (reply + "\n\n" + notecmd.saved_line(labels)).strip()
         if out["conflicts"]:
             reply += "\n\n" + "\n".join(c["text"] for c in out["conflicts"])
     return reply

@@ -1,0 +1,148 @@
+{
+ "criteria": [
+  {
+   "id": "summary",
+   "name": "Paper summary"
+  },
+  {
+   "id": "strengths",
+   "name": "Summary of strengths"
+  },
+  {
+   "id": "weaknesses",
+   "name": "Summary of weaknesses"
+  },
+  {
+   "id": "comments",
+   "name": "Comments, suggestions and typos"
+  },
+  {
+   "id": "soundness",
+   "name": "Soundness"
+  },
+  {
+   "id": "excitement",
+   "name": "Excitement"
+  },
+  {
+   "id": "overall",
+   "name": "Overall assessment"
+  },
+  {
+   "id": "confidence",
+   "name": "Confidence"
+  },
+  {
+   "id": "reproducibility",
+   "name": "Reproducibility"
+  },
+  {
+   "id": "ethics",
+   "name": "Ethical concerns"
+  }
+ ],
+ "steps": [
+  {
+   "message": "The authors report probing syntax in three pretrained encoders with linear and MLP probes, using sentences from an automatically parsed corpus (Abstract).",
+   "reply": "Okay, that sentence is from the opening summary.\n\nSaved under Paper summary. Say “move it” if that's wrong.",
+   "notes": [
+    {
+     "id": 0,
+     "field": "summary",
+     "text": "The authors report probing syntax in three pretrained encoders with linear and MLP probes, using sentences from an automatically parsed corpus (Abstract).",
+     "label": null
+    }
+   ]
+  },
+  {
+   "message": "add all of it",
+   "reply": "Added to Paper summary, marked as drafted from the paper's claims.",
+   "notes": [
+    {
+     "id": 0,
+     "field": "summary",
+     "text": "The authors report probing syntax in three pretrained encoders with linear and MLP probes, using sentences from an automatically parsed corpus (Abstract). They state that syntactic information peaks in the middle layers, and that probe accuracy drops by 4–9% when control tasks are used (Section 1). They further report that larger encoders show the same layer pattern, and that probe capacity changes accuracy by less than 2% across settings (Section 4).",
+     "label": "Drafted from the paper's claims"
+    }
+   ]
+  },
+  {
+   "message": "it is very sound in methodology, I like the probing and teh ablation combination",
+   "reply": "The probing and ablation are described in Section 3.\n\nSaved under Soundness. Say “move it” if that's wrong.",
+   "notes": [
+    {
+     "id": 0,
+     "field": "soundness",
+     "text": "it is very sound in methodology, I like the probing and teh ablation combination",
+     "label": null
+    },
+    {
+     "id": 1,
+     "field": "summary",
+     "text": "The authors report probing syntax in three pretrained encoders with linear and MLP probes, using sentences from an automatically parsed corpus (Abstract). They state that syntactic information peaks in the middle layers, and that probe accuracy drops by 4–9% when control tasks are used (Section 1). They further report that larger encoders show the same layer pattern, and that probe capacity changes accuracy by less than 2% across settings (Section 4).",
+     "label": "Drafted from the paper's claims"
+    }
+   ]
+  },
+  {
+   "message": "yeah and also as a strength",
+   "reply": "Also saved under Summary of strengths.",
+   "notes": [
+    {
+     "id": 0,
+     "field": "soundness",
+     "text": "it is very sound in methodology, I like the probing and teh ablation combination",
+     "label": null
+    },
+    {
+     "id": 1,
+     "field": "strengths",
+     "text": "it is very sound in methodology, I like the probing and teh ablation combination",
+     "label": null
+    },
+    {
+     "id": 2,
+     "field": "summary",
+     "text": "The authors report probing syntax in three pretrained encoders with linear and MLP probes, using sentences from an automatically parsed corpus (Abstract). They state that syntactic information peaks in the middle layers, and that probe accuracy drops by 4–9% when control tasks are used (Section 1). They further report that larger encoders show the same layer pattern, and that probe capacity changes accuracy by less than 2% across settings (Section 4).",
+     "label": "Drafted from the paper's claims"
+    }
+   ]
+  },
+  {
+   "message": "I want it to go in the strenghts",
+   "reply": "Moved to Summary of strengths.",
+   "notes": [
+    {
+     "id": 0,
+     "field": "strengths",
+     "text": "it is very sound in methodology, I like the probing and teh ablation combination",
+     "label": null
+    },
+    {
+     "id": 1,
+     "field": "summary",
+     "text": "The authors report probing syntax in three pretrained encoders with linear and MLP probes, using sentences from an automatically parsed corpus (Abstract). They state that syntactic information peaks in the middle layers, and that probe accuracy drops by 4–9% when control tasks are used (Section 1). They further report that larger encoders show the same layer pattern, and that probe capacity changes accuracy by less than 2% across settings (Section 4).",
+     "label": "Drafted from the paper's claims"
+    }
+   ]
+  },
+  {
+   "message": "I want you to add thes ummary I dont see that yet",
+   "reply": "That's already under Paper summary, marked as drafted from the paper's claims.",
+   "notes": [
+    {
+     "id": 0,
+     "field": "strengths",
+     "text": "it is very sound in methodology, I like the probing and teh ablation combination",
+     "label": null
+    },
+    {
+     "id": 1,
+     "field": "summary",
+     "text": "The authors report probing syntax in three pretrained encoders with linear and MLP probes, using sentences from an automatically parsed corpus (Abstract). They state that syntactic information peaks in the middle layers, and that probe accuracy drops by 4–9% when control tasks are used (Section 1). They further report that larger encoders show the same layer pattern, and that probe capacity changes accuracy by less than 2% across settings (Section 4).",
+     "label": "Drafted from the paper's claims"
+    }
+   ]
+  }
+ ]
+}

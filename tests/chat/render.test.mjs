@@ -215,3 +215,10 @@ test('the real PDF viewer renders as an empty scroller until the document loads,
   assert.equal(on, '<div class="pdf-scroller"></div>')
   assert.equal(renderToStaticMarkup(React.createElement(Viewer, { url: null, focus: null, onSelect() {} })), '')
 })
+
+test('a note drafted from the paper\'s claims shows its label as plain text above the paragraph (not a control)', () => {
+  const labelled = [{ id: 'summary', name: 'Paper summary', items: [{ kind: 'note', id: 1, text: 'The authors report X (Abstract).', label: "Drafted from the paper's claims" }] }]
+  const m = html({ draftOpen: true, draft: { sections: labelled, note: '', copied: false } })
+  assert.match(m, /<p class="ca-label">Drafted from the paper(&#x27;|')s claims<\/p><textarea/)
+  assert.deepEqual(buttons(m), ['Review draft', 'Attach paper', 'Send', 'Copy all'])
+})

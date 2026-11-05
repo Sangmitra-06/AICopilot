@@ -6,6 +6,10 @@
 export const LEGACY = { P: 'summary', S: 'strengths', W: 'weaknesses', Q: 'comments' }
 export const UNPLACED = { id: '', name: 'Not placed in a section yet' }
 
+// A note as a panel paragraph. A note the app drafted from the paper's claims (not the reviewer's words) keeps its label,
+// shown above the paragraph; the label is never part of the text, so Copy all leaves it out.
+const asItem = n => ({ kind: 'note', id: n.id, text: String(n.text), ...(n.label ? { label: String(n.label) } : {}) })
+
 export function buildSections(criteria, notes, draft) {
   const forms = (criteria || []).map(c => ({ id: c.id, name: c.name }))
   const ids = new Set(forms.map(f => f.id))
@@ -16,7 +20,7 @@ export function buildSections(criteria, notes, draft) {
     const sentences = gen
       .map((s, idx) => ({ kind: 'sentence', field: f.id, idx, text: String(s.text || '') }))
       .filter(i => i.text.trim())
-    const own = live.filter(n => fieldOf(n) === f.id).map(n => ({ kind: 'note', id: n.id, text: String(n.text) }))
+    const own = live.filter(n => fieldOf(n) === f.id).map(asItem)
     // A section shows its generated sentences once there are any. A note the reviewer added AFTER the draft was made is
     // not in them (the sentences list the notes they were made from, in `src`), so it is shown after them: nothing the
     // app said it added is ever hidden. A draft with no record of its sources keeps hiding the notes (never twice).
@@ -27,7 +31,7 @@ export function buildSections(criteria, notes, draft) {
       : own
     return { ...f, items: mine }
   })
-  const loose = live.filter(n => !ids.has(fieldOf(n))).map(n => ({ kind: 'note', id: n.id, text: String(n.text) }))
+  const loose = live.filter(n => !ids.has(fieldOf(n))).map(asItem)
   if (loose.length) sections.push({ ...UNPLACED, items: loose })
   return sections
 }

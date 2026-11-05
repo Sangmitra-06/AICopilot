@@ -1,5 +1,6 @@
-"""Fix 3: "Added to X" is written by the app, only after the note exists under that section, and a model-written
-sentence claiming a capture is removed unless a note was written this turn."""
+"""Fix 3: every line saying where a note went ("Added to X", "Saved under X", "Also saved under X", "Moved to X") is
+written by the app, only after the note exists under that section, and a model-written sentence claiming a capture is
+always removed. (Save-then-tell: a statement is saved at once; these tests drove offer-then-yes before.)"""
 import json
 import re
 
@@ -11,7 +12,7 @@ from test_nudges import SECTIONS
 
 SENTENCE = "The paper probes syntax in pretrained encoders using three datasets"
 MESSAGE = f"My summary sentence: {SENTENCE}"
-ADDED = re.compile(r"(?i)\badded to ([^.,\n]+)")
+ADDED = re.compile(r"(?i)\b(?:added to|saved under|moved to)\s+([^.,\n]+)")
 LABELS = {s["name"].lower(): s["id"] for s in SECTIONS}
 
 
@@ -25,15 +26,25 @@ def live_notes():
     return [n for n in store.notes("p1") if not n["removed"]]
 
 
-def assert_added_claims_are_true(reply):
-    """For every 'Added to <section>' in a reply, a matching non-removed note exists in the store."""
+def ever_held():
+    """Every section that held a note at some point (a note may be moved or undone later)."""
+    out = set()
+    for e in store.events("p1"):
+        if e["type"] in ("note_added", "note_field_set"):
+            out.add(e["payload"].get("field") or "")
+    return list(out)
+
+
+def assert_added_claims_are_true(reply, fields_now=None):
+    """For every 'Added to / Saved under / Moved to <section>' in a reply, a matching non-removed note exists in the
+    store (for a reply from earlier in the thread: a note was in that section at some point)."""
     for m in ADDED.finditer(reply):
-        where = m.group(1).strip().lower()
-        fields = [n["field"] for n in live_notes()]
-        if where in LABELS:
-            assert LABELS[where] in fields, (reply, fields)
-        else:
-            assert where.startswith("your draft") and fields, (reply, fields)
+        fields = fields_now if fields_now is not None else [n["field"] for n in live_notes()]
+        for where in m.group(1).strip().lower().split(" and "):        # "Saved under Soundness and Summary of strengths"
+            if where in LABELS:
+                assert LABELS[where] in fields, (reply, fields)
+            else:
+                assert where.startswith("your draft") and fields, (reply, fields)
 
 
 # ------------------------------------------------------------------ the guard itself: "Paper summary" is a section
@@ -76,56 +87,56 @@ def test_no_note_written_means_no_added_claim_whatever_the_form(env, raw):
     assert "added" not in body["reply"].lower() and live_notes() == []
 
 
-def pending(env, section="summary", later="Okay."):
+SAVED = "Saved under Paper summary. Say “move it” if that's wrong."
+
+
+def saved(env, section="summary", later="Okay.", first="Got it. Want me to add that to your draft?"):
     c, set_model = env
-    set_model({"reply": "Got it. Want me to add that to your draft?", "views": [{"text": SENTENCE, "section": section}]},
-              later)
-    post(c, MESSAGE)
-    assert live_notes() == []
-    return c
+    set_model({"reply": first, "views": [{"text": SENTENCE, "section": section}]}, later)
+    body = post(c, MESSAGE)
+    assert [(n["text"], n["field"]) for n in live_notes()] == [(SENTENCE, section)]
+    return c, body
 
 
-@pytest.mark.parametrize("answer", ["Yes lets add it as my sentence", "no i mean add the paper summary"])
-def test_a_confirmation_writes_the_note_and_the_apps_line_is_the_only_claim(env, answer):
-    c = pending(env, later="Added to Paper summary, in your own words. All set.")   # the model's own claim
-    body = post(c, answer)
+@pytest.mark.parametrize("first", ["Added to Paper summary, in your own words. All set.", "Got it."])
+def test_a_statement_writes_the_note_and_the_apps_line_is_the_only_claim(env, first):
+    c, body = saved(env, first=first)                                             # the model's own claim, or none
     [n] = live_notes()
-    assert (n["text"], n["field"]) == (SENTENCE, "summary")
-    assert len(ADDED.findall(body["reply"])) == 1 and body["reply"].endswith("Added to Paper summary, in your own words.")
+    assert len(ADDED.findall(body["reply"])) == 1 and body["reply"].endswith(SAVED)
     assert body["added"] == {"note_id": n["id"], "section": "summary", "label": "Paper summary"}
     assert_added_claims_are_true(body["reply"])
 
 
 def test_a_model_claim_naming_a_different_section_is_replaced_by_the_apps_true_line(env):
-    c = pending(env, later="Added to Summary of strengths.")
-    body = post(c, "yes")
-    assert "strengths" not in body["reply"].lower() and "Added to Paper summary" in body["reply"]
+    c, body = saved(env, first="Added to Summary of strengths.")
+    assert "strengths" not in body["reply"].lower() and body["reply"] == SAVED
 
 
-def test_a_reply_to_a_confirmation_that_was_only_the_model_claim_is_just_the_apps_line(env):
-    c = pending(env, later="Added to Paper summary.")
-    assert post(c, "yes lets add it")["reply"] == "Added to Paper summary, in your own words."
+def test_a_later_reply_that_is_only_a_model_claim_says_nothing_untrue(env):
+    c, _ = saved(env, later="Added to Paper summary.")
+    reply = post(c, "yes lets add it")["reply"]
+    assert "Added to" not in reply and len(live_notes()) == 1                      # saved once; no second claim
 
 
-def test_the_fallback_reply_after_a_confirmation_still_tells_the_truth(env, monkeypatch):
-    c = pending(env)
+def test_the_fallback_reply_never_claims_a_save(env, monkeypatch):
+    c, _ = saved(env)
     from app import chatflow
     monkeypatch.setattr(chatflow, "_chat", lambda msgs: (_ for _ in ()).throw(RuntimeError("down")))
-    body = post(c, "yes lets add it")
-    assert len(live_notes()) == 1 and "Added to Paper summary" in body["reply"]
+    body = post(c, "The baselines look dated to me")
+    assert len(live_notes()) == 1 and not ADDED.search(body["reply"]) and body["checks"]["fallback"] is True
 
 
-def test_an_unplaced_view_is_confirmed_as_added_to_the_draft(env):
+def test_an_unplaced_view_is_told_as_saved_in_the_draft(env):
     c, set_model = env
-    set_model({"reply": "Got it. Want me to add that to your draft?", "views": [{"text": SENTENCE, "section": ""}]}, "Ok.")
-    post(c, MESSAGE)
-    body = post(c, "yes")
-    assert body["reply"].endswith("Added to your draft, in your own words.") and live_notes()[0]["field"] == ""
+    set_model({"reply": "Got it.", "views": [{"text": SENTENCE, "section": ""}]})
+    body = post(c, MESSAGE)
+    assert body["reply"].endswith("Saved under your draft. Say “move it” if that's wrong.")
+    assert live_notes()[0]["field"] == ""
 
 
-def test_a_no_never_produces_an_added_line(env):
-    c = pending(env, later="Added to Paper summary anyway.")
-    body = post(c, "no")
+def test_dont_add_that_never_produces_an_added_line(env):
+    c, _ = saved(env, later="Added to Paper summary anyway.")
+    body = post(c, "don't add that")
     assert "dded" not in body["reply"] and live_notes() == [] and body.get("added") is None
 
 
@@ -135,7 +146,7 @@ def test_every_added_claim_in_a_whole_session_matches_a_note(env):
         ({"reply": "Got it. Want me to add that to your draft?", "views": [{"text": SENTENCE, "section": "summary"}]}, MESSAGE),
         ("Added to Paper summary.", "Yes lets add it as my sentence"),
         ("Added to Paper summary again.", "what does Section 4 report?"),
-        ({"reply": "Noted. Want me to add that to Weaknesses?", "views": [{"text": "The baselines look dated to me", "section": "weaknesses"}]},
+        ({"reply": "Noted. Added to Weaknesses.", "views": [{"text": "The baselines look dated to me", "section": "weaknesses"}]},
          "The baselines look dated to me"),
         ("Added to Weaknesses.", "no i mean add the strengths"),
         ("Added to Summary of weaknesses.", "thanks"),
@@ -146,7 +157,7 @@ def test_every_added_claim_in_a_whole_session_matches_a_note(env):
         assert_added_claims_are_true(body["reply"])
     for t in store.thread("p1"):
         if t.get("role") == "assistant":
-            assert_added_claims_are_true(t["text"])
+            assert_added_claims_are_true(t["text"], ever_held())
     assert sorted(n["field"] for n in live_notes()) == ["strengths", "summary"]
 
 
@@ -177,13 +188,17 @@ def test_replay_of_the_real_session_the_notes_the_panel_and_the_reply_always_agr
         if body.get("added"):
             assert any(n["id"] == body["added"]["note_id"] and n["field"] == body["added"]["section"] for n in panel_notes)
         elif not body["draft_changed"]:
-            assert not said
+            assert not said or "already saved under" in body["reply"], said         # only a true "it's already there"
     assert [(n["text"], n["field"]) for n in c.get("/notes/p1").json() if not n["removed"]] == [
         (SENTENCE, "summary"), (low, "strengths")]
-    assert sum("Added to" in r for r in replies) == 2                                    # exactly the two real captures
-    assert replies[0].count("Want me to add") == 1
+    assert [len(ADDED.findall(r)) for r in replies[:4]] == [1, 1, 1, 1]          # saved, already there, saved, moved
+    assert replies[1] == "That's already saved under Paper summary."
+    assert replies[3] == "Moved to Summary of strengths."
+    assert all(r.count("Want me to add") == 0 for r in replies)
     gap, draft = replies[4], replies[5]
     required = next(l for l in gap.splitlines() if l.startswith("- Required"))
     assert "Paper summary" not in required and "Summary of strengths" not in required and "Soundness" in required
     assert SENTENCE in draft and low in draft
     assert [s["text"] for s in c.get("/draft/p1").json()["summary"]["sentences"]] == [SENTENCE]
+
+

@@ -110,6 +110,7 @@ body { background: var(--ca-bg); color: var(--ca-ink); font-family: var(--ca-fon
 .ca-para:focus { outline: none; border-color: var(--ca-accent); background: #fff; }
 .ca-empty, .ca-note { margin: 0; color: var(--ca-muted); font-size: 15px; }
 .ca-note { margin-bottom: 24px; }
+.ca-label { margin: 6px 0 0; color: var(--ca-muted); font-size: 12px; font-style: italic; }
 .ca-copy {
   width: 100%; background: var(--ca-accent); color: #fff; border: 0; border-radius: 12px; padding: 10px 16px; cursor: pointer;
 }

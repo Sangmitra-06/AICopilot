@@ -127,18 +127,25 @@ own phrases back; do not map their answers onto a fixed rubric.
   unrequested-summary checks; the reviewer's own words are licensed only when attributed to
   them); on failure: regenerate once, then a neutral fallback; outcomes are logged
   (`chat_check` events, `store.chat_check_stats`, logger `copilot.chat`).
-  Capture (view -> offer -> `note_added`, editable/removable through `/events`), reword
+  Capture (view -> saved at once as `note_added`, editable/removable through `/events`), reword
   (stance words must survive), gap reports, non-blocking paper-conflict notes
   (`pointers.check` + fixed template) and drafting (never blocked; `synth.make_draft` and its
   gate are untouched) are server code over the event log. `coverage.py` = gap report;
   `nudges.py` = silent coverage map + at most one nudge per turn (gates: not during onboarding,
   not after a decline, not twice in a row, only at a natural pause; dismissed or twice-ignored
   nudges never repeat). `store.fold_chat` replays the chat events.
-  Replies are kept honest in `chatflow.keep_captures_honest` / `add_line`: the app's own line is the ONLY offer in a
-  reply ("Want me to add that to X?"; model offer sentences are removed) and the ONLY "Added to X, in your own words."
-  (written only after the accepted note is in the store, returned as `added` {note_id, section, label}; every model-written
-  capture claim is stripped). A pending offer is answered by rule (`capture.answer`): "yes" in any wording accepts, naming
-  another section re-targets and writes the note, "no" rejects, a question goes to the model. "What's missing?" and "draft
+  Notes are SAVE-THEN-TELL (`chatflow.save_views` / `keep_captures_honest`, commands in `notecmd.py`, run by
+  `chatflow.note_turn` before the walk, no model call): a stated view (model `views`, or the extraction call for a prose
+  reply) is saved at once in the reviewer's exact words in its section, and the app's line is the ONLY word about it:
+  "Saved under X. Say “move it” if that's wrong." (every model offer and capture claim is stripped; the line is written only
+  after the note is in GET /notes; `added` {note_id, section, label}; meta `saved` on the turn). Commands: "move it" (asks
+  which section; the next message naming one moves it), "put it in X" / "I want it to go in the strenghts" (typos ok),
+  "also as a strength" (a copy in a second section), "add the summary" / "add all of it" (the app's own summary or section
+  description, kept as meta `proposal` on its turn, saved with `origin: paper_claims` and `label` "Drafted from the paper's
+  claims", shown above the paragraph in the panel and never copied; "all of it" after a pasted sentence replaces that
+  sentence), "undo" (reverts the last `note_action`). Right after a save, a correction naming a section moves it and "don't
+  add that" undoes it. A saved point does not move the walk on; "next" does. Legacy pending offers (`capture.answer`,
+  `add_line`) still resolve as before. "What's missing?" and "draft
   it" (broad wording in `chatflow.GAP_REQ2/DRAFT_REQ2`, plus a model reply that only promises a list or draft) are answered
   by the app: the open-section list, and the draft text grouped by section, in the reply itself.
 - Guided walk (`walk.py`, `chatflow.open_turn/walk_turn/move_on_after_capture`, `store.fold_walk`). The app speaks first:
@@ -148,7 +155,7 @@ own phrases back; do not map their answers onto a fixed rubric.
   `parts`) plus an `opening_made` event on the paper, so a reload gets `opened:false, reason:"already"` and nothing repeats.
   Message 1, only when `summary_preference` is `before_reading`: a descriptive, claim-based summary written by the model
   through `generate_checked` (the normal neutrality checks, plus `require_pointer`: it must carry section pointers; at most
-  three sentences, one pointer run per sentence, `walk.one_pointer_each`); if the
+  three sentences, one pointer run per sentence, `walk.one_pointer_each`), between the app's own friendly lead-in and close (`walk.SUMMARY_LEAD`/`SUMMARY_CLOSES`); if the
   checks never pass or the model is down it is silently left out (never the generic fallback). `after_reading`, `none`,
   `on_request` or unset: no summary. Message 2 (the walk's first section): the app's own line, "You said you like to start with
   the intro, here it is." (no pointer on it), then a SHORT DESCRIPTIVE PARAGRAPH about that section (`chatflow.section_description`:
@@ -159,15 +166,21 @@ own phrases back; do not map their answers onto a fixed rubric.
   pointer itself ("... here it is (Section 1).", first <=3 passages cited), never the generic fallback. The reading order is `walk.parse_reading_order` over the reviewer's own
   `reading_order` text (source `answer`, or the extracted sentence; a skip/default says nothing): loose word matching
   (intro, methods/approach/setup/model, results/experiments/evaluation, related work, conclusion, limitations, "section 3")
-  against the paper's real section titles (`walk.real_sections`: no References/front matter/stray text); sections the
+  against the paper's real TOP-LEVEL sections (`walk.real_sections`: no References/front matter/stray text; every span gets
+  `top`, its top-level numbered section, in `main.spans_of` via `walk.add_tops` from the headings ingest found, so "3 Methods"
+  counts even with no text of its own before 3.1; a unit's spans include its subsections; ingest.py itself is untouched). The
+  method words (method/methodology/approach/setup/experimental setup) are one group, top-level titles win, and a method word
+  never lands on a results/discussion/conclusion section (`walk.NOT_METHODS`); "section 3.2" goes to section 3. Sections the
   reviewer names come first with their word (`said`), the rest follow in paper order with `said: null` (the app never claims
   "as you said" for those); a word in a clause with skip/never/last is not an instruction; unparseable or linear answers
   ("straight through") are plain paper order. Walk events on the paper: `opening_made` {order}, `walk_at` {index, section,
   reason}, `walk_done`, `walk_stopped`; `store.walk_state` folds them (pointer, covered, stopped, done). During the walk
   the app answers these itself (its line is app-written; the descriptive paragraph under a section line is the only model
-  call, and the end-of-order and stop lines have none): a done signal ("ok", "next", "got it", "move on", ...) -> "Moving to the
-  methods, as you said." (next section not yet shown, after the pointer; its spans cited); a jump ("go to results", "take me
-  to section 3", only when the whole message is the move) -> "Going to the results, as you asked." and the pointer resets
+  call, and the end-of-order and stop lines have none): a done signal ("ok", "next", "got it", "move on", ...) -> for a section they
+  named, "You said you like to read the intro first and then the methods, so let's go to the methods now." ("first" only
+  after the first named one; for one they did not name, "Moving to the abstract.") (next section not yet shown, after the pointer; its spans cited); a jump ("go to results", "take me
+  to section 3", only when the whole message is the move) -> "Going to the results, as you asked." ("Let's look at the
+  intro again, as you asked." only for a section already shown) and the pointer resets
   there; the end of the order -> "That was the last section in your order." plus the open review-form sections (the gap
   report); "stop guiding" -> stopped for good (no resume; nudges stop too). A covered section is not shown again unless the
   reviewer jumps back to it. An accepted capture moves on after the app's "Added to ..." line unless that turn carries a
@@ -218,20 +231,20 @@ reports today; update them when they change.
 
 1. **Python** (all backend tests, including the old-flow Python loop tests):
    `.\.venv\Scripts\python.exe -m pytest`
-   -> 2041 passed, 10 skipped (2051 collected: tests/neutrality 931, tests/onboarding 703,
-   tests/loops 43). The 10 skipped are the `live` tests (item 5); any other live model call must
-   fail loudly. (If RUN_LIVE=1 is set in your shell the 10 run too: 2051 passed.) HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
+   -> 2119 passed, 10 skipped (2129 collected). The 10 skipped are the `live` tests (item 5); any
+   other live model call must fail loudly. (If RUN_LIVE=1 is set in your shell the 10 run too.)
+   Unset COPILOT_FRESH in the shell first: with it set, 3 /config and old-flow tests fail. HTTP tests (tests/onboarding/test_http.py) use FastAPI TestClient;
    tests/conftest.py points COPILOT_DB at a temp file so the suite never opens the real copilot.db.
 2. **Old-flow loop tests** (node):
    `node --test tests/loops/*.test.mjs`
    -> 12 tests.
 3. **Chat-first frontend tests** (node):
    `node --test tests/chat/*.test.mjs`
-   -> 175 tests: controller, API client, draft model, flow switch, criteria chips, citations to
+   -> 181 tests: controller, API client, draft model, flow switch, criteria chips, citations to
    highlights (`cites.test.mjs`), the opening turn (`opening.test.mjs`), message formatting
    (`format.test.mjs`), the browser scripts' skip logic, and a render test that loads the
    real components through Vite's SSR loader and lists every control on screen (PDF pane included).
-   Both node suites together: `node --test tests/loops/*.test.mjs tests/chat/*.test.mjs` -> 187.
+   Both node suites together: `node --test tests/loops/*.test.mjs tests/chat/*.test.mjs` -> 193.
 4. **Frontend build** (run in frontend/): `npm run build`. Optional lint of the chat code, also
    in frontend/: `npx oxlint src/chat src/main.jsx src/pdf` (should print nothing).
 5. **Live-model tests** (not in the default run; real model calls with the real key):
@@ -261,9 +274,8 @@ reports today; update them when they change.
   the assistant may only say something was added when the backend recorded it this turn, and
   when a prose reply follows a stated view a short extraction call (`prompts.VIEW_SYS`, plain
   `VIEW | section | their words` lines, words must be a verbatim span of the message) finds the
-  view and the app OFFERS it in its own words ("Want me to add that to Summary of weaknesses?"),
-  the same offer-then-yes flow as for JSON replies: nothing is written until the reviewer says
-  yes. A flat `json_schema` response format gave 10/10 JSON in a trial (different provider;
+  view and the app SAVES it and says so in its own words ("Saved under Summary of weaknesses. Say
+  “move it” if that's wrong."), the same save-then-tell flow as for JSON replies. A flat `json_schema` response format gave 10/10 JSON in a trial (different provider;
   deliberately not adopted).
 
 

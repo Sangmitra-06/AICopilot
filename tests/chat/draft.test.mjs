@@ -140,3 +140,30 @@ test('a legacy-field note added after the draft also shows', () => {
   const s = buildSections(CRIT, [note(1, 'W', 'first'), note(2, 'W', 'second')], draft)
   assert.deepEqual(s[2].items.map(i => i.text), ['Generated.', 'second'])
 })
+
+// ------------------------------------------------------------------ the real session, replayed (fix item 5)
+// tests/chat/fixtures/session_notes.json is GET /notes after each of the session's messages, written by
+// tests/neutrality/test_notes_save_then_tell.py. After each one the panel shows exactly those notes, in those sections.
+import fs from 'node:fs'
+const SESSION = JSON.parse(fs.readFileSync(new URL('./fixtures/session_notes.json', import.meta.url), 'utf8'))
+
+test('the session replayed: after each message the panel shows every note GET /notes has, in its section', () => {
+  for (const s of SESSION.steps) {
+    const shown = buildSections(SESSION.criteria, s.notes, null)
+      .flatMap(sec => sec.items.map(i => [sec.id, i.text])).sort()
+    const want = s.notes.map(n => [n.field, n.text]).sort()
+    assert.deepEqual(shown, want, s.message)
+  }
+  const last = buildSections(SESSION.criteria, SESSION.steps.at(-1).notes, null)
+  assert.equal(last.find(x => x.id === 'summary').items.length, 1)
+  assert.equal(last.find(x => x.id === 'strengths').items.length, 1)
+  assert.equal(last.find(x => x.id === 'soundness').items.length, 0)          // moved, not copied
+})
+
+test('a note the app drafted from the paper\'s claims carries that label in the panel, and not in the copied text', () => {
+  const sections = buildSections(SESSION.criteria, SESSION.steps.at(-1).notes, null)
+  const summary = sections.find(x => x.id === 'summary').items[0]
+  assert.equal(summary.label, "Drafted from the paper's claims")
+  assert.equal(sections.find(x => x.id === 'strengths').items[0].label, undefined)    // the reviewer's own words: no label
+  assert.ok(!copyText(sections).includes('Drafted from'))
+})

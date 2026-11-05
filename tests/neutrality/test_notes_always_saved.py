@@ -1,5 +1,6 @@
-"""Item 4: every "Added to X" line has a matching note in GET /notes and in the Review draft panel, the Paper summary
-section included; and "what else do I have to add?" and "draft it" both take it into account."""
+"""Item 4: every line saying where a note went ("Saved under X", "Moved to X", "Added to X") has a matching note in
+GET /notes and in the Review draft panel, the Paper summary section included; and "what else do I have to add?" and
+"draft it" both take it into account. (Save-then-tell: the statement itself saves the note; these drove offer-then-yes.)"""
 import pytest
 
 from app import store
@@ -23,12 +24,11 @@ def state_notes(c):
 
 
 def offer_and_accept(c, set_model, section, text, label):
+    """The reviewer states `text`; it is saved at once under `section` and the app's line says so."""
     set_model({"reply": "Got it. Want me to add that to your draft?", "views": [{"text": text, "section": section}]}, {"reply": "Okay."})
-    offered = post(c, f"My view: {text}")
-    assert offered["capture"]["section"] == section
-    assert state_notes(c) == [] or all(n["text"] != text for n in state_notes(c))        # nothing is written before a yes
-    done = post(c, "yes")
-    assert f"Added to {label}" in done["reply"], done["reply"]
+    done = post(c, f"My view: {text}")
+    assert done["reply"].endswith(f"Saved under {label}. Say “move it” if that's wrong."), done["reply"]
+    assert any(n["text"] == text and n["field"] == section for n in state_notes(c))     # in GET /notes when told
     return done
 
 
@@ -70,12 +70,12 @@ def test_a_note_accepted_after_the_draft_was_made_is_saved_too(env):
     assert OTHER in redraft["reply"] and SUMMARY_SENTENCE in redraft["reply"]
 
 
-def test_a_retargeted_offer_is_saved_where_the_line_says(env):
+def test_a_moved_note_is_saved_where_the_line_says(env):
     c, set_model = env
     set_model({"reply": "Got it. Want me to add that to your draft?", "views": [{"text": SUMMARY_SENTENCE, "section": "weaknesses"}]}, {"reply": "Okay."})
     post(c, f"My view: {SUMMARY_SENTENCE}")
     done = post(c, "no I mean the paper summary")
-    assert "Added to Paper summary" in done["reply"]
+    assert done["reply"] == "Moved to Paper summary."
     assert [(n["text"], n["field"]) for n in state_notes(c)] == [(SUMMARY_SENTENCE, "summary")]
 
 

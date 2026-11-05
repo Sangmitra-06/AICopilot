@@ -1,5 +1,7 @@
 """The assistant never claims a capture happened unless the backend recorded it, and when the reply carries no
-structured fields an extraction call lets the app write the capture and confirm it in its own words."""
+structured fields an extraction call lets the app write the capture and confirm it in its own words.
+Save-then-tell: a stated view is saved at once and the app's "Saved under X. Say 'move it' if that's wrong." is the only
+line about it (these tests drove offer-then-yes before; what they guard is the same)."""
 import json
 
 import pytest
@@ -185,33 +187,30 @@ def test_an_unbacked_offer_in_prose_is_removed_so_a_later_yes_is_not_a_dead_end(
     assert body["reply"] == "Noted." and store.chat_state("p1")["views"] == {}
 
 
-def test_a_real_offer_is_the_apps_and_the_yes_then_makes_the_claim_true(env):
+def test_a_real_save_is_told_in_the_apps_words_and_the_note_exists(env):
     c, set_model = env
-    offer = "Noted. Want me to add that to the Weaknesses section of your draft?"
-    set_model({"reply": offer, "views": [{"text": VIEW, "section": "weaknesses"}]},
-              {"reply": "Added to Weaknesses."})
-    assert post(c, MESSAGE)["reply"] == "Noted." + chr(10)*2 + "Want me to add that to Summary of weaknesses?"   # the app's wording, once
-    body = post(c, "yes")
-    assert body["reply"] == "Added to Summary of weaknesses, in your own words."   # the app's line: the note exists now
-    assert [n["text"] for n in notes()] == [VIEW]
+    model_line = "Noted. Want me to add that to the Weaknesses section of your draft? Added to Weaknesses."
+    set_model({"reply": model_line, "views": [{"text": VIEW, "section": "weaknesses"}]})
+    assert post(c, MESSAGE)["reply"] == "Noted." + n2 + SAVED_LINE        # the app's wording, once
+    assert [(n["text"], n["field"]) for n in notes()] == [(VIEW, "weaknesses")]
 
 
-def test_a_no_does_not_make_an_added_claim_true(env):
+def test_a_later_model_claim_is_still_removed(env):
     c, set_model = env
-    set_model({"reply": "Noted. Want me to add that to the Weaknesses section?", "views": [{"text": VIEW, "section": "weaknesses"}]},
-              {"reply": "Okay. Added to Weaknesses anyway."})
+    set_model({"reply": "Noted.", "views": [{"text": VIEW, "section": "weaknesses"}]},
+              {"reply": "Okay. Added to Strengths anyway."})
     post(c, MESSAGE)
     body = post(c, "no")
-    assert "Added" not in body["reply"] and notes() == []
+    assert "Added" not in body["reply"] and [n["field"] for n in notes()] == ["weaknesses"]
 
 
-def test_a_model_driven_accept_gets_the_apps_claim(env):
+def test_a_model_written_section_change_is_never_believed_only_the_apps_move_is(env):
     c, set_model = env
-    set_model({"reply": "Noted. Want me to add that to the Weaknesses section?", "views": [{"text": VIEW, "section": "weaknesses"}]},
+    set_model({"reply": "Noted.", "views": [{"text": VIEW, "section": "weaknesses"}]},
               {"reply": "Done. Added to Strengths.", "offer_response": "accept", "offer_section": "strengths"})
     post(c, MESSAGE)
-    body = post(c, "yes, but put it under strengths")
-    assert body["reply"] == "Done." + n2 + "Added to Summary of strengths, in your own words."   # the app's line, not the model's
+    body = post(c, "yes, but put it under strengths")                       # the app moves it, with no model call
+    assert body["reply"] == "Moved to Summary of strengths."
     assert notes()[0]["field"] == "strengths"
 
 
@@ -222,11 +221,11 @@ def test_sentences_about_the_paper_are_never_taken_for_claims(env):
     assert post(c, "what changed between the two versions of the model?")["reply"] == reply
 
 
-# ------------------------------------------------------------------ prose replies: extraction, then offer, then confirm
-# A view found in a prose reply is OFFERED, exactly as for a JSON reply. Nothing is written until the reviewer says yes.
+# ------------------------------------------------------------------ prose replies: extraction, then save, then tell
+# A view found in a prose reply is SAVED at once, exactly as for a JSON reply, and the app says where it went.
 
 EXTRACT = f"VIEW | weaknesses | {VIEW}"
-OFFER_LINE = "Want me to add that to Summary of weaknesses?"
+SAVED_LINE = "Saved under Summary of weaknesses. Say “move it” if that's wrong."
 
 
 def sent_to_extraction(model):
@@ -238,68 +237,62 @@ def events_of(*kinds):
     return [e["type"] for e in store.events("p1") if e["type"] in kinds]
 
 
-def test_a_view_in_a_prose_reply_is_offered_in_the_apps_words_and_nothing_is_written(env):
+def test_a_view_in_a_prose_reply_is_saved_and_told_in_the_apps_words(env):
     c, set_model = env
     model = set_model(PROSE_WITH_CLAIM + " Want me to add that to your draft?", EXTRACT)
     body = post(c, MESSAGE)
     assert len(model.calls) == 2
-    # the model's claim and its own offer are gone; the app asks, in its own words
+    # the model's claim and its own offer are gone; the app says where it went, in its own words
     assert body["reply"] == ("You're saying five participants per region seems low. Table 2 has the per-region counts "
-                             f"(Section 4).\n\n{OFFER_LINE}")
-    assert notes() == [] and "note_added" not in events_of("note_added")        # nothing written
-    assert body["draft_changed"] is False
-    assert body["capture"] == {"id": "v1", "text": VIEW, "section": "weaknesses", "label": "Summary of weaknesses"}
-    assert events_of("view_stated", "capture_offered") == ["view_stated", "capture_offered"]
-    v = store.chat_state("p1")["views"]["v1"]
-    assert (v["offered"], v["outcome"]) == (True, None)
-    assert store.thread("p1")[-1]["meta"]["offer"] == "v1"                       # the next turn will treat "yes" as the answer
+                             f"(Section 4).\n\n{SAVED_LINE}")
+    assert [(n["text"], n["field"]) for n in notes()] == [(VIEW, "weaknesses")]
+    assert body["draft_changed"] is True and body["capture"] is None
+    assert body["added"]["section"] == "weaknesses" and body["added"]["note_id"] == notes()[0]["id"]
+    assert events_of("view_stated", "capture_offered") == ["view_stated"]
+    assert store.chat_state("p1")["views"]["v1"]["outcome"] == "accepted"
 
 
-def test_a_yes_then_writes_it_exactly_as_for_a_json_reply(env):
+def test_the_saved_note_is_in_the_draft_items_exactly_as_for_a_json_reply(env):
     c, set_model = env
-    set_model("You're saying the sample is small.", EXTRACT, "Added to Summary of weaknesses.")
+    set_model("You're saying the sample is small.", EXTRACT)
     post(c, MESSAGE)
-    body = post(c, "yes")
     [n] = notes()
     assert (n["text"], n["field"]) == (VIEW, "weaknesses")
-    assert body["resolved"] == {"outcome": "accepted", "text": VIEW} and body["draft_changed"] is True
-    assert body["reply"] == "Added to Summary of weaknesses, in your own words."   # the app's line, true now
-    assert store.chat_state("p1")["views"]["v1"]["outcome"] == "accepted"
     assert any(i["text"] == VIEW for i in synth.items("p1"))
 
 
-def test_a_no_writes_nothing_and_a_later_claim_is_still_removed(env):
+def test_dont_add_that_takes_it_out_and_a_later_claim_is_still_removed(env):
     c, set_model = env
     set_model("You're saying the sample is small.", EXTRACT, "Okay. Added to Summary of weaknesses anyway.")
     post(c, MESSAGE)
-    body = post(c, "no")
-    assert notes() == [] and body["resolved"]["outcome"] == "rejected" and "Added" not in body["reply"]
+    assert post(c, "don't add that")["reply"] == "Undone: I removed it from Summary of weaknesses."
+    body = post(c, "ok, what else?")
+    assert notes() == [] and "Added" not in body["reply"]
 
 
-def test_the_model_can_take_a_worded_yes_and_move_the_section(env):
+def test_a_worded_correction_moves_the_section(env):
     c, set_model = env
-    set_model("You're saying the sample is small.", EXTRACT,
-              {"reply": "Done. Added to Summary of strengths.", "offer_response": "accept", "offer_section": "strengths"})
+    set_model("You're saying the sample is small.", EXTRACT)
     post(c, MESSAGE)
     post(c, "yes, but put it under strengths")
     assert notes()[0]["field"] == "strengths"
 
 
-def test_the_offer_lasts_one_turn_like_any_other(env):
+def test_a_correction_lasts_one_turn_like_any_other(env):
     c, set_model = env
     set_model("You're saying the sample is small.", EXTRACT, "Table 2 has the counts.", "Sure.")
     post(c, MESSAGE)
-    post(c, "where are the counts?")                                              # moved on without answering
-    body = post(c, "yes")
-    assert notes() == [] and body["resolved"] is None
+    post(c, "where are the counts?")                                              # moved on
+    post(c, "No, I mean strengths")
+    assert [n["field"] for n in notes()] == ["weaknesses"]
 
 
-def test_until_the_yes_the_view_is_stated_but_not_captured_and_gap_reports_say_so(env):
+def test_a_saved_view_is_not_reported_as_uncaptured(env):
     c, set_model = env
     set_model("You're saying the sample is small.", EXTRACT, "Table 2 has the counts.")
     post(c, MESSAGE)
     post(c, "where are the counts?")
-    assert [u["text"] for u in post(c, "what's missing?")["gaps"]["uncaptured"]] == [VIEW]
+    assert post(c, "what's missing?")["gaps"]["uncaptured"] == []
 
 
 def test_the_extraction_prompt_carries_neutrality_the_sections_and_only_the_reviewers_message(env):
@@ -321,11 +314,11 @@ def test_the_extraction_prompt_carries_neutrality_the_sections_and_only_the_revi
     "```json\n" + json.dumps({"views": [{"text": VIEW, "section": "weaknesses"}]}) + "\n```",
     "Here you go:\n" + f"VIEW | weaknesses | {VIEW}" + "\nHope that helps.",
 ])
-def test_the_extraction_is_read_tolerantly_and_leads_to_an_offer(env, raw):
+def test_the_extraction_is_read_tolerantly_and_leads_to_a_save(env, raw):
     c, set_model = env
     set_model("Okay.", raw)
     body = post(c, MESSAGE)
-    assert body["capture"]["text"] == VIEW and body["reply"].endswith(OFFER_LINE) and notes() == []
+    assert body["reply"].endswith(SAVED_LINE) and [n["text"] for n in notes()] == [VIEW]
 
 
 @pytest.mark.parametrize("raw", ["NONE", "none.", "", "Sure! The reviewer seems to be saying the sample is small.",
@@ -365,46 +358,42 @@ def test_words_the_reviewer_did_not_say_are_never_offered(env, invented):
     assert body["capture"] is None and events_of("capture_offered") == [] and "Want me" not in body["reply"]
 
 
-def test_what_is_offered_and_then_written_is_a_span_of_the_reviewers_own_message(env):
+def test_what_is_written_is_a_span_of_the_reviewers_own_message(env):
     c, set_model = env
     message = "Honestly, I think five participants per region seems low, although the dataset itself is nice."
-    set_model("Okay.", "VIEW | weaknesses | five participants per region seems low\nVIEW | strengths | the dataset itself is nice", "Added.")
+    set_model("Okay.", "VIEW | weaknesses | five participants per region seems low\nVIEW | strengths | the dataset itself is nice")
     body = post(c, message)
-    assert body["capture"]["text"] == "five participants per region seems low"           # one offer at a time
-    assert body["reply"].endswith("Want me to add “five participants per region seems low” to Summary of weaknesses?")
-    assert [v["text"] for v in store.chat_state("p1")["views"].values()] == [
-        "five participants per region seems low", "the dataset itself is nice"]          # both are remembered
-    post(c, "yes")
-    assert [n["text"] for n in notes()] == ["five participants per region seems low"]
+    assert sorted((n["field"], n["text"]) for n in notes()) == [
+        ("strengths", "the dataset itself is nice"), ("weaknesses", "five participants per region seems low")]
+    assert body["reply"].endswith("Saved under Summary of weaknesses and Summary of strengths. Say “move it” if that's wrong.")
     assert all(n["text"].lower() in message.lower() for n in notes())
 
 
-def test_a_section_the_form_does_not_have_is_offered_as_the_draft_and_lands_unplaced(env):
+def test_a_section_the_form_does_not_have_is_told_as_the_draft_and_lands_unplaced(env):
     c, set_model = env
-    set_model("Okay.", f"VIEW | no_such_section | {VIEW}", "Added.")
+    set_model("Okay.", f"VIEW | no_such_section | {VIEW}")
     body = post(c, MESSAGE)
-    assert body["reply"].endswith("Want me to add that to your draft?")
-    post(c, "yes")
+    assert body["reply"].endswith("Saved under your draft. Say “move it” if that's wrong.")
     assert notes()[0]["field"] == ""
 
 
 def test_a_section_named_by_its_label_is_understood(env):
     c, set_model = env
-    set_model("Okay.", f"VIEW | Summary of strengths | {VIEW}", "Added.")
+    set_model("Okay.", f"VIEW | Summary of strengths | {VIEW}")
     body = post(c, MESSAGE)
-    assert body["reply"].endswith("Want me to add that to Summary of strengths?")
-    post(c, "yes")
+    assert body["reply"].endswith("Saved under Summary of strengths. Say “move it” if that's wrong.")
     assert notes()[0]["field"] == "strengths"
 
 
-def test_at_most_three_views_are_remembered_and_one_is_offered(env):
+def test_at_most_three_views_are_saved_from_one_message(env):
     c, set_model = env
     message = "The baseline looks weak. The writing is hard to follow. The dataset is nice. The ablation is missing."
     lines = "\n".join(f"VIEW | comments | {s}" for s in
                       ["The baseline looks weak", "The writing is hard to follow", "The dataset is nice", "The ablation is missing"])
     set_model("Okay.", lines)
-    post(c, message)
-    assert len(store.chat_state("p1")["views"]) == 3 and len(events_of("capture_offered")) == 1 and notes() == []
+    body = post(c, message)
+    assert len(store.chat_state("p1")["views"]) == 3 and len(notes()) == 3
+    assert body["reply"].count("Saved under") == 1                         # one line for all of them
 
 
 def test_a_view_already_in_the_draft_is_not_offered(env):
@@ -416,23 +405,21 @@ def test_a_view_already_in_the_draft_is_not_offered(env):
     assert len(notes()) == 1 and body["capture"] is None and "Want me" not in body["reply"]
 
 
-def test_saying_the_same_thing_twice_is_offered_once_and_captured_once(env):
+def test_saying_the_same_thing_twice_is_saved_once(env):
     c, set_model = env
-    set_model("Okay.", EXTRACT, "Added.", "Okay again.", EXTRACT)
+    set_model("Okay.", EXTRACT, "Okay again.", EXTRACT)
     post(c, MESSAGE)
-    post(c, "yes")
     body = post(c, MESSAGE)
-    assert len(notes()) == 1 and body["capture"] is None
+    assert len(notes()) == 1 and "Saved under" not in body["reply"]
 
 
-def test_the_offer_does_not_count_as_a_nudge_and_a_nudge_does_not_hide_it(env):
+def test_a_save_does_not_count_as_a_nudge_and_a_nudge_does_not_hide_it(env):
     c, set_model = env
     set_model("Your draft has nothing under Summary of weaknesses yet.", EXTRACT)
     body = post(c, MESSAGE)
-    assert body["capture"] is not None and body["nudge"] is None
+    assert body["reply"].endswith(SAVED_LINE) and body["nudge"] is None
 
 
-# the extraction is only for statements: no extra call for anything else
 NOT_STATEMENTS = [
     "which datasets do they use?", "ok", "thanks", "is this novel?", "do you agree?", "what's missing?", "draft it",
     "reword this: The baseline is weak and the writing is sloppy, I think.", "why did they remove outliers",
@@ -451,9 +438,9 @@ def test_no_extraction_call_for_questions_requests_or_pauses(env, message):
 
 def test_no_extraction_when_the_reply_already_carries_structured_fields(env):
     c, set_model = env
-    model = set_model({"reply": "Noted. Want me to add that to Weaknesses?", "views": [{"text": VIEW, "section": "weaknesses"}]}, EXTRACT)
+    model = set_model({"reply": "Noted.", "views": [{"text": VIEW, "section": "weaknesses"}]}, EXTRACT)
     post(c, MESSAGE)
-    assert len(model.calls) == 1 and notes() == []                         # the model's own offer stands; nothing written
+    assert len(model.calls) == 1 and [n["text"] for n in notes()] == [VIEW]     # the model's views are saved; one call
 
 
 def test_no_extraction_after_a_fallback(env):
@@ -472,11 +459,10 @@ def test_no_extraction_during_onboarding(chat_env):
 
 # ------------------------------------------------------------------ the written note is an ordinary note
 
-def test_a_note_written_after_a_yes_can_be_edited_and_removed_like_any_other(env):
+def test_a_saved_note_can_be_edited_and_removed_like_any_other(env):
     c, set_model = env
-    set_model("Okay.", EXTRACT, "Added.")
+    set_model("Okay.", EXTRACT)
     post(c, MESSAGE)
-    post(c, "yes")
     nid = notes()[0]["id"]
     ev = lambda t, p: c.post("/events", json={"paper_id": "p1", "type": t, "payload": p}).status_code
     assert ev("note_text_edited", {"id": nid, "text": "five participants per region"}) == 200
@@ -485,18 +471,16 @@ def test_a_note_written_after_a_yes_can_be_edited_and_removed_like_any_other(env
     assert c.get("/notes/p1").json() == []
 
 
-def test_the_capture_shows_in_the_next_prompt_only_after_the_yes(env):
+def test_the_saved_note_shows_in_the_next_prompt(env):
     c, set_model = env
-    model = set_model("Okay.", EXTRACT, "Added.", "Table 2 has it.")
+    model = set_model("Okay.", EXTRACT, "Table 2 has it.")
     post(c, MESSAGE)
-    assert notes() == []
-    post(c, "yes")
     post(c, "which datasets do they use?")
     assert VIEW in model.calls[-1][0]["content"].split("THE REVIEW DRAFT SO FAR")[1]
     assert post(c, "what's missing?")["gaps"]["uncaptured"] == []
 
 
-def test_a_conflict_with_the_paper_is_noted_with_the_offer_and_blocks_nothing(env, monkeypatch):
+def test_a_conflict_with_the_paper_is_noted_with_the_save_and_blocks_nothing(env, monkeypatch):
     from app import pointers
     c, set_model = env
     conflict = "Table 2 reports accuracy of 80 on SST-2"
@@ -505,9 +489,9 @@ def test_a_conflict_with_the_paper_is_noted_with_the_offer_and_blocks_nothing(en
         "paper_quote": "accuracy of 71.2 on SST-2", "explanation": "The paper gives 71.2."}]}))
     set_model("Okay.", f"VIEW | comments | {conflict}")
     body = post(c, conflict)
-    assert body["capture"]["text"] == conflict and len(body["conflicts"]) == 1
-    assert "Want me to add that to Comments, suggestions and typos?" in body["reply"]
-    assert body["reply"].endswith("Want to check?") and notes() == []
+    assert len(body["conflicts"]) == 1 and [n["text"] for n in notes()] == [conflict]
+    assert "Saved under Comments, suggestions and typos." in body["reply"]
+    assert body["reply"].endswith("Want to check?")
 
 
 def test_the_apps_offer_line_is_plain_and_asks_once():

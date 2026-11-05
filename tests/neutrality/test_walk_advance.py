@@ -211,29 +211,29 @@ def test_before_the_opening_or_with_no_walk_ok_is_ordinary_chat(env):
     assert body["reply"] == "Okay." and len(model.calls) == 1
 
 
-def test_finishing_a_captured_point_moves_on_after_the_confirmation(env):
+def test_a_saved_point_stays_on_the_section_and_next_moves_on(env):
+    # Save-then-tell: the statement itself is saved, so there is no confirmation turn to move on after. The reviewer may
+    # have more to say about this section; "next" moves on, as anywhere in the walk.
     c, set_model = env
     start(c)
     set_model({"reply": OFFERING, "views": [{"text": "The ablation study is missing", "section": "weaknesses"}]})
-    offer = say(c, "The ablation study is missing")
-    assert offer["capture"] and "go to the methods" not in offer["reply"]                # an offer is not a finished point
-    set_model({"reply": "Okay."})
-    body = say(c, "yes")
-    assert body["resolved"]["outcome"] == "accepted" and body["added"]
-    assert "Added to" in body["reply"] and "You said you like to read the intro first and then the methods, so let's go to the methods now" in body["reply"]
-    assert body["reply"].index("Added to") < body["reply"].index("You said you like")
+    saved = say(c, "The ablation study is missing")
+    assert saved["added"] and saved["reply"].endswith("Saved under Summary of weaknesses. Say “move it” if that's wrong.")
+    assert "go to the methods" not in saved["reply"] and pointer() == 0
+    body = say(c, "next")
+    assert body["reply"].startswith("You said you like to read the intro first and then the methods, so let's go to the methods now")
     assert sections_cited(body) == {"3 Method"} and pointer() == 1
     assert any(p["cite"] for p in body["parts"]) and "".join(p["text"] for p in body["parts"]) == body["reply"]
 
 
-def test_a_rejected_capture_does_not_move_on(env):
+def test_a_refused_save_does_not_move_on(env):
     c, set_model = env
     start(c)
     set_model({"reply": OFFERING, "views": [{"text": "The ablation study is missing", "section": "weaknesses"}]})
     say(c, "The ablation study is missing")
     set_model({"reply": "Okay."})
-    body = say(c, "no")
-    assert "go to the methods" not in body["reply"] and pointer() == 0
+    body = say(c, "don't add that")
+    assert "go to the methods" not in body["reply"] and pointer() == 0 and store.notes("p1") == []
 
 
 def test_ordinary_chat_during_the_walk_does_not_move_the_pointer(env):

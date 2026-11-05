@@ -1,4 +1,5 @@
-"""Item 3: capture, reword, gap reports, paper-conflict notes and drafting, all through /chat in plain language."""
+"""Item 3: capture, reword, gap reports, paper-conflict notes and drafting, all through /chat in plain language.
+Capture is save-then-tell: a stated view is saved at once in the reviewer's words and the app says where it went."""
 import json
 import re
 
@@ -40,22 +41,23 @@ def env(chat_env):
 
 # ------------------------------------------------------------------ (a) capture
 
-def test_a_stated_view_is_offered_for_the_right_section_in_their_own_words(env):
+def test_a_stated_view_is_saved_in_the_right_section_in_their_own_words(env):
     c, set_model = env
     set_model(stated())
     body = post(c, f"I think {VIEW}.")
-    assert body["capture"] == {"id": "v1", "text": VIEW, "section": "weaknesses", "label": "Summary of weaknesses"}
-    assert notes() == []                                      # an offer, not yet in the draft
+    [n] = notes()
+    assert (n["text"], n["field"]) == (VIEW, "weaknesses")
+    assert body["added"] == {"note_id": n["id"], "section": "weaknesses", "label": "Summary of weaknesses"}
+    assert body["capture"] is None and body["reply"].endswith("Saved under Summary of weaknesses. Say “move it” if that's wrong.")
     types = [e["type"] for e in store.events("p1")]
-    assert "view_stated" in types and "capture_offered" in types and "note_added" not in types
+    assert "view_stated" in types and "capture_offered" not in types and "note_added" in types
 
 
-def test_a_bare_yes_puts_the_view_in_the_draft_verbatim(env):
+def test_the_saved_view_is_in_the_draft_verbatim_and_in_the_next_prompt(env):
     c, set_model = env
-    set_model(stated(), {"reply": "Added to Weaknesses."})
-    post(c, f"I think {VIEW}.")
-    body = post(c, "yes")
-    assert body["resolved"] == {"outcome": "accepted", "text": VIEW} and body["draft_changed"] is True
+    set_model(stated())
+    body = post(c, f"I think {VIEW}.")
+    assert body["draft_changed"] is True
     [n] = notes()
     assert (n["text"], n["field"], n["by"] if "by" in n else "chat") == (VIEW, "weaknesses", "chat")
     assert any(i["text"] == VIEW and i["field"] == "weaknesses" for i in synth.items("p1"))
@@ -64,37 +66,36 @@ def test_a_bare_yes_puts_the_view_in_the_draft_verbatim(env):
     assert VIEW in model.system.split("THE REVIEW DRAFT SO FAR")[1]   # the next prompt shows it in the draft
 
 
-def test_a_bare_no_drops_the_offer_and_nothing_is_captured(env):
+def test_undo_takes_the_saved_view_out_again(env):
     c, set_model = env
-    set_model(stated(), {"reply": "Okay, leaving it out."})
+    set_model(stated())
     post(c, f"I think {VIEW}.")
-    body = post(c, "no")
-    assert body["resolved"]["outcome"] == "rejected" and notes() == []
-    assert store.chat_state("p1")["views"]["v1"]["outcome"] == "rejected"
+    body = post(c, "undo")
+    assert body["reply"] == "Undone: I removed it from Summary of weaknesses." and notes() == []
+    assert body["draft_changed"] is True
 
 
-def test_the_model_can_resolve_a_wordier_answer_and_move_it_to_another_section(env):
+def test_a_wordier_answer_moves_it_to_another_section(env):
     c, set_model = env
     set_model(stated(), {"reply": "Moved it to Strengths.", "offer_response": "accept", "offer_section": "strengths"})
     post(c, f"I think {VIEW}.")
     body = post(c, "yes, but put it under strengths")
-    assert body["resolved"]["outcome"] == "accepted" and notes()[0]["field"] == "strengths"
+    assert body["reply"] == "Moved to Summary of strengths." and notes()[0]["field"] == "strengths"
 
 
-def test_an_offer_only_stays_open_for_the_next_turn(env):
+def test_a_later_yes_never_saves_it_again(env):
     c, set_model = env
     set_model(stated(), {"reply": "Section 4 has the numbers."}, {"reply": "Sure."})
     post(c, f"I think {VIEW}.")
-    post(c, "where are the numbers?")          # moved on without answering
-    body = post(c, "yes")                       # a later "yes" must not capture the old view
-    assert notes() == [] and body["resolved"] is None
+    post(c, "where are the numbers?")
+    post(c, "yes")
+    assert len(notes()) == 1
 
 
 def test_captured_text_is_editable_and_removable_through_the_existing_events_endpoint(env):
     c, set_model = env
-    set_model(stated(), {"reply": "Added."})
+    set_model(stated())
     post(c, f"I think {VIEW}.")
-    post(c, "yes")
     nid = notes()[0]["id"]
     ev = lambda t, p: c.post("/events", json={"paper_id": "p1", "type": t, "payload": p}).status_code
     assert ev("note_text_edited", {"id": nid, "text": "five participants per region"}) == 200
@@ -111,13 +112,12 @@ def test_a_view_that_is_not_a_verbatim_span_of_their_message_is_ignored(env):
     assert body["capture"] is None and store.chat_state("p1")["views"] == {}
 
 
-def test_a_view_without_an_actual_offer_in_the_reply_is_remembered_but_not_offered(env):
+def test_a_view_is_saved_even_when_the_models_reply_does_not_mention_it(env):
     c, set_model = env
     set_model(stated(reply="Table 2 has the per-region counts (Section 4)."), {"reply": "Sure."})
     body = post(c, f"I think {VIEW}.")
-    assert body["capture"] is None and "v1" in store.chat_state("p1")["views"]
-    post(c, "yes")
-    assert notes() == []                       # nothing was offered, so a "yes" captures nothing
+    assert [n["text"] for n in notes()] == [VIEW]
+    assert body["reply"] == "Table 2 has the per-region counts (Section 4).\n\n" + "Saved under Summary of weaknesses. Say “move it” if that's wrong."
 
 
 def test_a_view_the_model_invents_cannot_be_captured(env):
@@ -209,26 +209,34 @@ def test_what_is_missing_lists_every_gap_at_once_without_calling_the_model(env):
 
 def test_a_gap_report_includes_what_was_said_earlier_but_never_made_it_into_the_draft(env):
     c, set_model = env
-    set_model(stated(reply="Table 2 has the per-region counts (Section 4)."), {"reply": "Sure."})
-    post(c, f"I think {VIEW}.")
+    # A view stated but never written (from before save-then-tell: offered, never answered) is still reported.
+    store.log("p1", "view_stated", {"vid": "v1", "text": VIEW, "section": "weaknesses"})
+    store.log("p1", "capture_offered", {"vid": "v1"})
     g = post(c, "what am I missing?")["gaps"]
     assert [u["text"] for u in g["uncaptured"]] == [VIEW]
 
 
-def test_a_captured_view_is_not_reported_as_missing(env):
+def test_a_saved_view_that_was_undone_is_not_reported_as_missing(env):
     c, set_model = env
-    set_model(stated(), {"reply": "Added."})
+    set_model(stated())
     post(c, f"I think {VIEW}.")
-    post(c, "yes")
+    post(c, "undo")
     assert post(c, "any gaps?")["gaps"]["uncaptured"] == []
 
 
-def test_a_rejected_view_is_not_reported_as_missing(env):
+def test_a_captured_view_is_not_reported_as_missing(env):
     c, set_model = env
     set_model(stated(), {"reply": "Okay."})
     post(c, f"I think {VIEW}.")
-    post(c, "no")
     assert post(c, "any gaps?")["gaps"]["uncaptured"] == []
+
+
+def test_a_refused_view_is_not_reported_as_missing(env):
+    c, set_model = env
+    set_model(stated(), {"reply": "Okay."})
+    post(c, f"I think {VIEW}.")
+    post(c, "don't add that")
+    assert post(c, "any gaps?")["gaps"]["uncaptured"] == [] and notes() == []
 
 
 def test_the_model_can_ask_for_the_gap_report_in_other_words(env):
@@ -276,7 +284,7 @@ def test_a_conflict_with_the_paper_is_a_neutral_non_blocking_note(env, monkeypat
     [note] = body["conflicts"]
     assert note["text"] == ("Section 4 Experiments (line 80) states “accuracy of 71.2 on SST-2”; your note says "
                             "“accuracy of 80 on SST-2”. Want to check?")
-    assert body["reply"].endswith(note["text"]) and body["capture"]["text"] == CONFLICT_VIEW   # the capture still stands
+    assert body["reply"].endswith(note["text"]) and [n["text"] for n in notes()] == [CONFLICT_VIEW]   # still saved
     for word in ("wrong", "incorrect", "mistake", "error", "false", "inaccurate"):
         assert word not in note["text"].lower()
     assert cc.reply_errors(note["text"], {"reviewer_text": CONFLICT_VIEW}) == []
@@ -290,7 +298,7 @@ def test_the_conflict_check_failing_changes_nothing(env, monkeypatch):
     monkeypatch.setattr(pointers, "_chat", boom)
     set_model(stated(view=CONFLICT_VIEW, section="comments", reply="Noted. Want me to add that to the Comments section?"))
     body = post(c, f"{CONFLICT_VIEW}.")
-    assert body["conflicts"] == [] and body["capture"] is not None and body["checks"]["fallback"] is False
+    assert body["conflicts"] == [] and len(notes()) == 1 and body["checks"]["fallback"] is False
 
 
 def test_an_answer_pointer_is_not_a_conflict_note(env, monkeypatch):

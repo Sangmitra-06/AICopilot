@@ -84,7 +84,7 @@ def test_fenced_json_works_like_plain_json_including_capture(env):
     set_model("```json\n" + json.dumps({"reply": "Noted. Want me to add that to the Weaknesses section?",
               "views": [{"text": "five participants per region seems low", "section": "weaknesses"}]}) + "\n```")
     body = post(c, "I think five participants per region seems low")
-    assert body["checks"] == {"attempts": 1, "fallback": False} and body["capture"]["section"] == "weaknesses"
+    assert body["checks"] == {"attempts": 1, "fallback": False} and body["added"]["section"] == "weaknesses"
     assert forms() == ["fenced"]
 
 
