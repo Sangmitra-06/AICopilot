@@ -1,3 +1,6 @@
+import mimetypes
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("text/javascript", ".js")
 import base64, hashlib, logging, os, pathlib
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
