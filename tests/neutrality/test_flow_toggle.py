@@ -50,7 +50,7 @@ def test_the_old_flows_source_files_are_unchanged_since_the_chat_first_work_bega
 def test_the_default_flow_is_chat(chat_env, monkeypatch):
     c, set_model = chat_env
     monkeypatch.delenv("COPILOT_FLOW", raising=False)
-    assert c.get("/config").json() == {"flow": "chat", "chat_enabled": True, "modes": ["chat", "guided"]}
+    assert c.get("/config").json() == {"flow": "chat", "chat_enabled": True, "modes": ["chat", "guided"], "boot_id": None}
     set_model({"reply": "Hello."})
     make_reviewer("rev")
     assert c.post("/chat/p1", json={"reviewer_id": "rev", "message": "hi"}).status_code == 200
@@ -61,7 +61,7 @@ def test_the_toggle_turns_chat_off_and_leaves_the_old_flow_serving(chat_env, mon
     model = set_model({"reply": "should not run"})
     make_reviewer("rev")
     monkeypatch.setenv("COPILOT_FLOW", "guided")
-    assert c.get("/config").json() == {"flow": "guided", "chat_enabled": False, "modes": ["chat", "guided"]}
+    assert c.get("/config").json() == {"flow": "guided", "chat_enabled": False, "modes": ["chat", "guided"], "boot_id": None}
     r = c.post("/chat/p1", json={"reviewer_id": "rev", "message": "hi"})
     assert r.status_code == 409 and r.json()["error"] == "chat_disabled" and not model.calls
     # the old flow's endpoints answer as before
