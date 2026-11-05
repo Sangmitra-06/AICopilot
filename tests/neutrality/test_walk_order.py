@@ -6,7 +6,7 @@ import pytest
 
 from app import chat_checks as cc, store, walk
 from app.verify import BANNED
-from conftest import PAPER, make_reviewer
+from conftest import PAPER, asked, make_reviewer
 from test_walk_opening import SUMMARY, open_, before, assistant_turns
 
 
@@ -124,10 +124,10 @@ def test_the_opening_offers_the_first_section_in_their_words_and_cites_its_spans
     make_reviewer("rev", reading_order="I start with the intro and then go to methods.", reading_order__value="intro_first")
     model = set_model({"reply": SUMMARY})
     body = open_(c)
-    assert model.calls == []                                                     # no summary asked for: no model call
+    assert asked(model) == []                                                    # no summary asked for
     assert body["opened"] is True and [m["kind"] for m in body["messages"]] == ["section"]
     m = body["messages"][0]
-    assert m["reply"].startswith("Starting with the intro, as you said you like to (Section 1).")
+    assert m["reply"].startswith("You said you like to start with the intro, here it is.\n\n")
     assert [x["id"] for x in m["cites"]] == ["s2"]                              # its spans: the PDF scrolls there
     assert m["parts"] and any(p["cite"] == ["s2"] for p in m["parts"])
     assert not BANNED.search(m["reply"])
@@ -142,7 +142,7 @@ def test_with_a_summary_the_section_comes_second_as_its_own_message(chat_env):
     set_model({"reply": SUMMARY})
     body = open_(c)
     assert [m["kind"] for m in body["messages"]] == ["summary", "section"]
-    assert body["messages"][1]["reply"].startswith("Starting with the abstract, as you said you like to (Abstract).")
+    assert body["messages"][1]["reply"].startswith("You said you like to start with the abstract, here it is.\n\n")
     assert [t["meta"]["opening"] for t in assistant_turns()] == ["summary", "section"]   # both survive a reload
 
 

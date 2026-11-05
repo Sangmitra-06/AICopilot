@@ -139,3 +139,8 @@ def chat_env(tmp_path, monkeypatch):
     with TestClient(main.app) as c:
         yield c, set_model
     db.close()
+
+
+def asked(model):
+    """The scripted model's calls that are NOT the walk's section descriptions (summary, chat turns, ...)."""
+    return [m for m in model.calls if not any("Describe the section" in x["content"] for x in m)]

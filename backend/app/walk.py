@@ -162,13 +162,70 @@ def marked(line, spans, title):
     return f"{line} {ids}." if ids else f"{line}."
 
 
-def opening_line(entry, spans):
+def opening_lead(entry):
+    """The app's own words that take the reviewer to the first section (no full stop, no pointer)."""
     if entry.get("said"):
-        return marked(f"Starting with {where(entry)}, as you said you like to", spans, entry["section"])
-    return marked(f"Let's begin at the start of the paper, with {where(entry)}", spans, entry["section"])
+        return f"You said you like to start with {where(entry)}, here it is"
+    return f"Let's begin at the start of the paper, with {where(entry)}"
+
+
+def opening_line(entry, spans):
+    return marked(opening_lead(entry), spans, entry["section"])
 
 
 GUIDE_HINT = "Say “next” when you want to move on, name any part to go straight there, or tell me to stop guiding."
+
+
+# ------------------------------------------------------------------ model-written descriptions: sentences and pointers
+
+_ABBR = re.compile(r"\b(?:et al|e\.g|i\.e|vs|figs?|eqs?|secs?|cf|etc|approx|no)\.", re.I)
+_BOUND = re.compile(r"([.!?][\"”')]*)((?:[ \t]*\[[^\]\n]{1,80}\])*)\s+")
+_END = re.compile(r"([.!?]+[\"”')]*)\s*$")
+_DOT = "\x00"
+
+
+def sentences(text):
+    """The text cut into sentences. A citation marker that follows the full stop stays with the sentence it ends;
+    "et al.", "e.g." and the like do not end one."""
+    t = _ABBR.sub(lambda m: m.group(0).replace(".", _DOT), (text or "").strip())
+    out, pos = [], 0
+    for m in _BOUND.finditer(t):
+        out.append(t[pos:m.end(2)])
+        pos = m.end()
+    if pos < len(t):
+        out.append(t[pos:])
+    return [s.replace(_DOT, ".").strip() for s in out if s.strip()]
+
+
+def one_pointer_each(text, valid, limit=None):
+    """Tidy a model-written, marker-bearing paragraph. At most `limit` sentences; each sentence carries at most ONE run of
+    markers at its end (the sentence's markers, merged); a marker that is not a span in `valid` (id -> span) is dropped; a
+    run whose pointer reads exactly like the previous sentence's is not shown again (its spans still count, see the second
+    value). Returns (text, [ids whose pointer is not shown])."""
+    out, hidden, prev = [], [], None
+    for sent in sentences(text)[:limit]:
+        ids = []
+        for m in cites.GROUP.finditer(sent):
+            ids += [t for t in (cites._tokens(m.group(1)) or []) if t in valid]
+        body = cites.GROUP.sub(lambda m: "" if cites._tokens(m.group(1)) else m.group(0), sent)
+        end = _END.search(body)
+        punct = end.group(1) if end else "."
+        body = re.sub(r"\s+([.,;:!?])", r"\1", " ".join((body[:end.start()] if end else body).split()))
+        ids = list(dict.fromkeys(ids))
+        if ids:
+            label = cites.label([valid[i] for i in ids])
+            if label == prev:
+                hidden += ids
+                ids = []
+            else:
+                prev = label
+        out.append(body + "".join((" " if k == 0 else "") + f"[{i}]" for k, i in enumerate(ids)) + punct)
+    return " ".join(out), list(dict.fromkeys(hidden))
+
+
+def cite_entry(span):
+    return {"id": span["id"], "page": span.get("page"), "bbox": span.get("bbox"), "section": span.get("section"),
+            "lines": span.get("lines")}
 
 
 # ------------------------------------------------------------------ reading the reviewer's message during the walk
@@ -226,14 +283,17 @@ def active(w):
 
 
 
-def move_line(entry, spans, n, kind="advance"):
-    """The line that takes the reviewer to a section: "Moving to the methods, as you said." The reviewer's own word is
-    used when they named the part, "as you asked" after a jump, and nothing is claimed for a part they did not name."""
+def move_lead(entry, kind="advance"):
+    """"Moving to the methods, as you said" (no full stop, no pointer). The reviewer's own word is used when they named the
+    part, "as you asked" after a jump, and nothing is claimed for a part they did not name."""
     x = where(entry)
     if kind == "jump":
-        return marked(f"Going to {x}, as you asked", spans, entry["section"])
-    why = ", as you said" if entry.get("said") else ""
-    return marked(f"Moving to {x}{why}", spans, entry["section"])
+        return f"Going to {x}, as you asked"
+    return f"Moving to {x}{', as you said' if entry.get('said') else ''}"
+
+
+def move_line(entry, spans, n, kind="advance"):
+    return marked(move_lead(entry, kind), spans, entry["section"])
 
 
 STOPPED = "Okay, I'll stop guiding. Ask for anything you want from here, and I'll follow."

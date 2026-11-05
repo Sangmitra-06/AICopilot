@@ -26,6 +26,15 @@ def scripted(msgs):
     system, said = msgs[0]["content"], msgs[-1]["content"].lower()
     if "VIEW |" in system:
         return "NONE"
+    m = re.match(r'describe the section "(.+)" for me', said)
+    if m:   # the guided walk's short description of one section: sentences that cite that section's own passages
+        title = next((t for t in re.findall(r"^## (.+)$", system, re.M) if t.lower() == m.group(1)), None)
+        found = re.search(r"^## " + re.escape(title) + r"\n((?:\[p\d+-s\d+\][^\n]*\n?)+)", system, re.M) if title else None
+        ids = re.findall(r"^\[(p\d+-s\d+)\]", found.group(1), re.M)[:2] if found else []
+        if not ids:
+            return "Nothing to describe here."
+        return " ".join("This part of %s presents its text on page %d of the paper [%s]." % (title, k + 1, i)
+                        for k, i in enumerate(ids))
     if "accuracy" in said:
         return "Table 2 reports accuracy on SST-2 and CoLA [%s]." % span_with(system, "Table 2")
     if "contribution" in said:

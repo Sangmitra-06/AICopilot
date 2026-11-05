@@ -94,12 +94,26 @@ NUDGES
 # The opening turn: the reviewer chose, in onboarding, to have a summary before they read. This is the turn note and
 # the stand-in for the reviewer's message; the rest of the prompt is the ordinary chat prompt (NEUTRALITY included).
 OPENING_NOTE = ("The reviewer has just attached the paper and said in onboarding that they want a short summary before "
-                "they read it. Write that summary now as your whole reply: three to five sentences, descriptive and "
+                "they read it. Write that summary now as your whole reply: at most three sentences, descriptive and "
                 "claim-based only. Each sentence says what the authors state or report (\"The authors report ...\") and "
                 "ends with the label of the passage it refers to, in square brackets. Use no evaluative words about the "
                 "paper or any part of it. Do not offer to add anything to the draft, do not ask a question, and do not "
                 "say what to do next.")
 OPENING_ASK = "I have just attached the paper."
+
+
+def section_note(title):
+    """The turn note for the guided walk: a short description of one section, as the whole reply."""
+    return (f'The reviewer is being taken to the section "{title}" of the paper. Write a short paragraph describing what '
+            "that section contains, as your whole reply: at most three sentences, descriptive only. Each sentence says "
+            "what the authors state, do or present in that section and ends with the label of one passage from that "
+            "section, in square brackets (use only passages under that heading, one label per sentence). Use no evaluative "
+            "words about the paper or any part of it. Do not offer to add anything to the draft, do not ask a question, "
+            "and do not say what to do next.")
+
+
+def section_ask(title):
+    return f'Describe the section "{title}" for me.'
 
 # A short, separate call used when a chat reply carries no structured fields: it picks out what the reviewer stated, in
 # their own words, so the app can keep it. A plain line format (not JSON), because it must work however the provider

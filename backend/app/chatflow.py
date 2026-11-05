@@ -358,18 +358,59 @@ def opening_summary(pid, phrases, spans, names):
         return None
     sections = [{"id": i, "name": n} for i, n in names.items()]
     reply, _ = capture.scrub(reply, sections, claims_ok=False, offers_ok=False, empty_line="")   # no offers, no claims
+    reply, hidden = walk.one_pointer_each(reply, {s["id"]: s for s in spans if cites.citable(s)}, limit=3)   # <= 3 sentences
     shown, parts, found = cites.extract(reply, spans)
     if not shown.strip() or not found:
         return None
-    return {"kind": "summary", "reply": shown, "parts": parts, "cites": found}
+    return {"kind": "summary", "reply": shown, "parts": parts, "cites": add_hidden(found, hidden, spans)}
 
 
-def section_message(spans, entry, hint=""):
-    """The app's own line taking the reviewer to one section: their words, a pointer, nothing about the paper. Its
-    passages are cited, so the PDF scrolls there."""
-    text = walk.opening_line(entry, spans) + ((PARA + hint) if hint else "")
+def add_hidden(found, hidden, spans):
+    """The cites of a paragraph whose repeated pointers were not shown twice: their spans still count (the PDF marks them)."""
+    by_id = {s["id"]: s for s in spans}
+    have = {c["id"] for c in found}
+    return found + [walk.cite_entry(by_id[i]) for i in hidden if i in by_id and i not in have]
+
+
+def section_description(pid, view, spans, entry):
+    """A short descriptive paragraph about one section of the paper, written by the model through the same checks as every
+    chat reply (plus: it must carry pointers). Its markers are tidied to one per sentence and only passages of THIS section
+    are kept. Returns (marked text, hidden ids) or None (checks never pass, model down, nothing cites the section): the
+    caller then shows the app's plain pointer line instead, never the generic fallback."""
+    title = entry["section"]
+    own = {s["id"]: s for s in walk.section_spans(spans, title, n=len(spans))}
+    if not own:
+        return None
+    phrases, names, pref = profile_phrases(view), synth.names(), summary_preference(view)
+    system = build_chat_system(phrases, pref, paper_text(spans), draft_text(pid), [prompts.section_note(title)],
+                               sections=list(names.items()))
+    ctx = {"reviewer_text": " ".join(phrases.values()), "wants_decline": False, "summary_pref": pref,
+           "summary_requested": True, "require_pointer": True, "reword_pool": []}
+    reply, info, _ = generate_checked(build_chat_messages(system, [], prompts.section_ask(title)), ctx, phrases, spans)
+    chat_checks.record(pid, store, info)
+    if info["fallback"]:
+        log.warning("section description dropped (%s): %s", title, "; ".join(info["errors"])[:300])
+        return None
+    sections = [{"id": i, "name": n} for i, n in names.items()]
+    reply, _ = capture.scrub(reply, sections, claims_ok=False, offers_ok=False, empty_line="")
+    text, hidden = walk.one_pointer_each(reply, own, limit=3)
+    if not cites.extract(text, spans)[2]:
+        return None
+    return text, hidden
+
+
+def section_message(pid, view, spans, entry, lead, hint="", kind="section"):
+    """The app taking the reviewer to one section: its own short line (the reviewer's words, no pointer), then a short
+    descriptive paragraph about the section with one pointer per sentence. Every cited passage is in the section, so the PDF
+    scrolls to and marks it. If no description can be made, the line carries the pointer itself (first passages cited)."""
+    desc = section_description(pid, view, spans, entry)
+    if desc:
+        text, hidden = lead + "." + PARA + desc[0], desc[1]
+    else:
+        text, hidden = walk.marked(lead, spans, entry["section"]), []
+    text += (PARA + hint) if hint else ""
     shown, parts, found = cites.extract(text, spans)
-    return {"kind": "section", "reply": shown, "parts": parts, "cites": found}
+    return {"kind": kind, "reply": shown, "parts": parts, "cites": add_hidden(found, hidden, spans)}
 
 
 def open_turn(pid, rid, spans):
@@ -391,7 +432,7 @@ def open_turn(pid, rid, spans):
         order = walk.build_order(view, spans)
         summarized = bool(messages)
         if order:
-            messages.append(section_message(spans, order[0], walk.GUIDE_HINT))
+            messages.append(section_message(pid, view, spans, order[0], walk.opening_lead(order[0]), walk.GUIDE_HINT))
         for m in messages:
             log_chat(pid, "assistant", m["reply"], opening=m["kind"], cites=[c["id"] for c in m["cites"]],
                      parts=m["parts"])
@@ -434,7 +475,7 @@ def turn(pid, rid, message, spans):
     st = dict(store.chat_state(pid), last_assistant=previous)
 
     w = store.walk_state(pid)
-    wt = walk_turn(pid, spans, message, w, ruled, variant) if walk.active(w) else None
+    wt = walk_turn(pid, spans, message, w, ruled, variant, view) if walk.active(w) else None
     if wt:                                                # a walk signal: the app answers it itself, no model call
         out.update(reply=wt["reply"], parts=wt["parts"], cites=wt["cites"], gaps=wt.get("gaps"), walk=wt["walk"],
                    checks={"attempts": 0, "fallback": False})
@@ -453,7 +494,7 @@ def turn(pid, rid, message, spans):
         model_turn(pid, message, spans, view, phrases, pref, hist, st, names, ruled, variant, out, meta)
 
     if not wt and walk.active(w):
-        move_on_after_capture(pid, spans, w, out, meta)
+        move_on_after_capture(pid, spans, w, out, meta, view)
     out.pop("_vid", None)
     out["draft_changed"] = (out["resolved"] or {}).get("outcome") == "accepted" or bool((out["drafted"] or {}).get("drafted"))
     log_chat(pid, "user", message)
@@ -463,7 +504,7 @@ def turn(pid, rid, message, spans):
     return out
 
 
-def walk_turn(pid, spans, message, w, ruled, variant):
+def walk_turn(pid, spans, message, w, ruled, variant, view):
     """The guided walk's answer to the reviewer's message, written by the app (no model, nothing about the paper), or None
     when the message is not a walk signal: "stop guiding"; a jump ("go to results"), which resets the pointer; or a done
     signal ("ok", "next", "got it", "move on"), which moves to the next section that has not been shown. A done signal
@@ -472,9 +513,9 @@ def walk_turn(pid, spans, message, w, ruled, variant):
 
     def moved(i, kind, entry):
         store.log(pid, "walk_at", {"index": i, "section": entry["section"], "reason": kind})
-        text = walk.move_line(entry, spans, len(w["covered"]), kind)
-        shown, parts, found = cites.extract(text, spans)
-        return {"reply": shown, "parts": parts, "cites": found, "walk": {"kind": kind, "section": entry["section"]}}
+        m = section_message(pid, view, spans, entry, walk.move_lead(entry, kind))
+        return {"reply": m["reply"], "parts": m["parts"], "cites": m["cites"],
+                "walk": {"kind": kind, "section": entry["section"]}}
 
     if walk.STOP.search(msg):
         store.log(pid, "walk_stopped", {})
@@ -495,7 +536,7 @@ def walk_turn(pid, spans, message, w, ruled, variant):
             "walk": {"kind": "end", "section": None}}
 
 
-def move_on_after_capture(pid, spans, w, out, meta):
+def move_on_after_capture(pid, spans, w, out, meta, view):
     """The reviewer has just finished a point (a capture was accepted this turn): after the confirmation, move to the next
     section. Not when this turn already carries a nudge or a fresh offer, a gap list or a draft (one prompt per turn)."""
     if (out["resolved"] or {}).get("outcome") != "accepted" or out["nudge"] or out["capture"] or out["gaps"]             or (out["drafted"] or {}).get("drafted") or meta.get("intent") in ("gap_report", "draft") or meta.get("declined"):
@@ -505,7 +546,8 @@ def move_on_after_capture(pid, spans, w, out, meta):
         return
     entry = w["order"][i]
     store.log(pid, "walk_at", {"index": i, "section": entry["section"], "reason": "capture"})
-    shown, parts, found = cites.extract(walk.move_line(entry, spans, len(w["covered"])), spans)
+    m = section_message(pid, view, spans, entry, walk.move_lead(entry))
+    shown, parts, found = m["reply"], m["parts"], m["cites"]
     before = out["reply"]
     base = out["parts"] or [{"text": before, "cite": None}]
     out["reply"] = before + PARA + shown

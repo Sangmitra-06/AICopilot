@@ -19,7 +19,7 @@ def test_live_opening_summary_is_descriptive_with_pointers_and_passes_the_checks
     summary = body["messages"][0]
     assert summary["cites"] and re.search(r"\((?:Section|Abstract)", summary["reply"]), summary["reply"]
     assert not cc.banned_hits(summary["reply"], set()) and "[s" not in summary["reply"], summary["reply"]   # (technical terms such as "weak supervision" are not ratings)
-    assert body["messages"][1]["reply"].startswith("Starting with the introduction, as you said you like to")
+    assert body["messages"][1]["reply"].startswith("You said you like to start with the introduction, here it is")
 
 
 @pytest.mark.live

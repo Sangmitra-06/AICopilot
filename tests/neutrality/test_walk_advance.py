@@ -9,7 +9,7 @@ import pytest
 
 from app import chat_checks as cc, main, store, walk
 from app.verify import BANNED
-from conftest import make_reviewer
+from conftest import asked, make_reviewer
 
 SECTIONS = ["Abstract", "1 Introduction", "2 Related Work", "3 Method", "4 Experiments", "5 Results", "6 Conclusion"]
 
@@ -74,7 +74,7 @@ def test_a_done_signal_moves_to_the_next_section_in_the_reviewers_words_and_cite
     assert body["reply"].startswith("Moving to the methods, as you said") and "(Section 3)" in body["reply"]
     assert sections_cited(body) == {"3 Method"} and body["cites"][0]["page"] == 4
     assert body["parts"] and any(p["cite"] for p in body["parts"])
-    assert model.calls == [] and pointer() == 1
+    assert asked(model) == [] and pointer() == 1
     assert body["checks"] == {"attempts": 0, "fallback": False}
 
 
@@ -108,7 +108,7 @@ def test_every_section_is_walked_once_and_the_end_offers_the_open_review_section
     assert end["cites"] == [] and end["gaps"] is not None
     assert end["gaps"]["required_open"] or end["gaps"]["optional_open"]          # the open review-form sections
     assert "nothing in it yet" in end["reply"]
-    assert model.calls == [] and store.walk_state("p1")["done"] is True
+    assert asked(model) == [] and store.walk_state("p1")["done"] is True
     again = say(c, "ok")                                                          # the walk is over: ordinary chat again
     assert again["reply"] == "A normal answer." and len(model.calls) == 1
 
@@ -140,7 +140,7 @@ def test_a_jump_goes_there_resets_the_pointer_and_cites_the_section(env, message
     model = set_model({"reply": "should not be asked"})
     body = say(c, message)
     assert body["reply"].startswith("Going to ") and "as you asked" in body["reply"]
-    assert sections_cited(body) == {section} and model.calls == []
+    assert sections_cited(body) == {section} and asked(model) == []
     order = [e["section"] for e in store.walk_state("p1")["order"]]
     assert pointer() == order.index(section)                                      # the pointer is where they went
 
@@ -174,7 +174,7 @@ def test_stop_guiding_stops_and_the_walk_never_resumes(env, message):
     model = set_model({"reply": "Fine."})
     body = say(c, message)
     assert "stop guiding" in body["reply"].lower() or "stopped" in body["reply"].lower()
-    assert body["cites"] == [] and model.calls == [] and store.walk_state("p1")["stopped"] is True
+    assert body["cites"] == [] and asked(model) == [] and store.walk_state("p1")["stopped"] is True
     after = say(c, "ok")                                                          # no more walking: ordinary chat
     assert not after["reply"].startswith(("Moving", "On to", "Next,")) and len(model.calls) == 1
     again = say(c, "next")
@@ -251,7 +251,7 @@ def test_a_walk_turn_is_one_prompt_and_never_carries_a_nudge(env):
     for _ in range(3):
         body = say(c, "ok")
         assert body["nudge"] is None and body["reply"].count("?") == 0
-    assert model.calls == []
+    assert asked(model) == []
     metas = [t["meta"] for t in store.thread("p1") if t.get("role") == "assistant" and t.get("kind") == "chat"]
     assert not any(m.get("nudge") for m in metas)
 

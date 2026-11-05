@@ -6,7 +6,7 @@ import pytest
 
 from app import chat_checks as cc, store
 from app.verify import BANNED
-from conftest import make_reviewer
+from conftest import asked, make_reviewer
 
 SUMMARY = ("The authors say they study probing of syntax in pretrained encoders [s1]. They list a new probing dataset "
            "and a layer-wise analysis as contributions [s2]. They report accuracy of 71.2 on SST-2 [s4].")
@@ -38,8 +38,8 @@ def test_before_reading_opens_with_a_descriptive_summary_with_pointers(chat_env)
     assert "(Abstract)" in first["reply"] and "(Section 1)" in first["reply"] and "(Section 4)" in first["reply"]
     assert {x["id"] for x in first["cites"]} == {"s1", "s2", "s4"}
     assert not BANNED.search(first["reply"])
-    assert len(model.calls) == 1
-    assert "short summary before they read" in model.system                    # the opening directive reached the model
+    assert len(asked(model)) == 1
+    assert "short summary before they read" in asked(model)[-1][0]["content"]                    # the opening directive reached the model
 
 
 def test_the_summary_goes_through_the_normal_neutrality_checks(chat_env):
@@ -47,9 +47,9 @@ def test_the_summary_goes_through_the_normal_neutrality_checks(chat_env):
     before()
     model = set_model({"reply": "This is a novel and strong paper [s1]."}, {"reply": SUMMARY})
     body = open_(c)
-    assert len(model.calls) == 2                                                # rejected once, regenerated
+    assert len(asked(model)) == 2                                                # rejected once, regenerated
     assert "novel" not in body["messages"][0]["reply"]
-    assert any("evaluative" in str(m.get("content", "")) for m in model.calls[1])
+    assert any("evaluative" in str(m.get("content", "")) for m in asked(model)[1])
 
 
 def test_a_summary_without_pointers_is_not_accepted(chat_env):
@@ -58,7 +58,7 @@ def test_a_summary_without_pointers_is_not_accepted(chat_env):
     model = set_model({"reply": "The authors say they study probing of syntax in pretrained encoders."},
                       {"reply": SUMMARY})
     body = open_(c)
-    assert len(model.calls) == 2 and "(Section 4)" in body["messages"][0]["reply"]
+    assert len(asked(model)) == 2 and "(Section 4)" in body["messages"][0]["reply"]
 
 
 @pytest.mark.parametrize("bad", ["Yes, it is novel and well executed [s1].", "Great paper, I would accept it [s1]."])
@@ -96,7 +96,7 @@ def test_after_reading_none_or_unset_skips_the_summary(chat_env, said):
     make_reviewer("rev", **said)
     model = set_model({"reply": SUMMARY})
     body = open_(c)
-    assert model.calls == []                                                    # not even asked
+    assert asked(model) == []                                                    # not even asked
     assert [m["kind"] for m in body["messages"]] == ["section"]                 # no summary: only the first section
     assert [t["meta"]["opening"] for t in assistant_turns()] == ["section"]
 
@@ -108,7 +108,7 @@ def test_the_opening_is_made_once_per_paper_even_after_a_reload(chat_env):
     assert open_(c)["opened"] is True
     again = open_(c)                                                            # a reload asks again
     assert again["opened"] is False and again["messages"] == [] and again["reason"] == "already"
-    assert len(model.calls) == 1
+    assert len(asked(model)) == 1
     assert len(assistant_turns()) == 2                                          # the summary and the first section
     assert [e["type"] for e in store.events("p1") if e["type"] == "opening_made"] == ["opening_made"]
 
@@ -130,7 +130,7 @@ def test_no_opening_while_onboarding_is_open_and_it_happens_when_it_closes(chat_
     make_reviewer("rev", closed=False, summary_preference="Before, please.", summary_preference__value="before_reading")
     model = set_model({"reply": SUMMARY})
     body = open_(c)
-    assert body == {"opened": False, "messages": [], "reason": "onboarding"} and model.calls == []
+    assert body == {"opened": False, "messages": [], "reason": "onboarding"} and asked(model) == []
     store.log(store.reviewer_key("rev"), "onboarding_closed", {"reason": "complete", "defaulted": []})
     assert open_(c)["opened"] is True
 
